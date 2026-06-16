@@ -83,8 +83,28 @@ function CheckoutForm() {
   const [ccExpiry, setCcExpiry] = useState('');
   const [ccCvv, setCcCvv] = useState('');
 
+  const [cep, setCep] = useState('');
+  const [endereco, setEndereco] = useState('');
+  const [numero, setNumero] = useState('');
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   
+  useEffect(() => {
+    const cleanCep = cep.replace(/\D/g, '');
+    if (cleanCep.length === 8) {
+      fetch(`https://viacep.com.br/ws/${cleanCep}/json/`)
+        .then(res => res.json())
+        .then(data => {
+          if (!data.erro) {
+            setEndereco(`${data.logradouro}, ${data.bairro} - ${data.localidade}/${data.uf}`);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setEndereco('');
+    }
+  }, [cep]);
+
   // Status de Transação (Carregamento e Sucesso)
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -132,6 +152,8 @@ function CheckoutForm() {
       if (!ccName.includes(' ')) newErrors.ccName = 'Nome como impresso no cartão';
       if (ccExpiry.length < 5) newErrors.ccExpiry = 'Validade incompleta';
       if (ccCvv.length < 3) newErrors.ccCvv = 'CVV inválido';
+      if (cep.replace(/\D/g, '').length !== 8) newErrors.cep = 'CEP inválido';
+      if (!numero) newErrors.numero = 'Número obrigatório';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -175,10 +197,12 @@ function CheckoutForm() {
     } 
     // 3. Se for Asaas Cartão, pegamos os dados diretos
     else if (paymentMethod === 'credit_card') {
-      payload.cc_number = ccNumber;
-      payload.cc_name = ccName;
-      payload.cc_expiry = ccExpiry;
-      payload.cc_cvv = ccCvv;
+        payload.cc_name = ccName;
+        payload.cc_number = ccNumber;
+        payload.cc_expiry = ccExpiry;
+        payload.cc_cvv = ccCvv;
+        payload.cep = cep.replace(/\D/g, '');
+        payload.numero = numero;
     }
 
     // 4. Enviar para o WordPress (EAD)
@@ -291,8 +315,45 @@ function CheckoutForm() {
               {currency === 'BRL' && (
                 <div>
                   <label className="block text-sm font-medium text-stone-600 mb-1">CPF</label>
-                  <input value={cpf} onChange={e=>setCpf(e.target.value)} type="text" className={`w-full border ${errors.cpf ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="000.000.000-00" />
+                  <input type="text" value={cpf} onChange={e => {
+                    let v = e.target.value.replace(/\D/g, '');
+                    if (v.length > 11) v = v.slice(0,11);
+                    v = v.replace(/(\d{3})(\d)/, '$1.$2');
+                    v = v.replace(/(\d{3})(\d)/, '$1.$2');
+                    v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+                    setCpf(v);
+                    setErrors(prev => ({...prev, cpf: ''}));
+                  }} className={`w-full p-3 bg-stone-50 border rounded-lg focus:ring-2 outline-none transition-all ${errors.cpf ? 'border-red-500 focus:ring-red-200' : 'border-stone-200 focus:border-emerald-500 focus:ring-emerald-100'}`} placeholder="000.000.000-00" />
                   {errors.cpf && <p className="text-red-500 text-xs mt-1">{errors.cpf}</p>}
+                </div>
+              )}
+
+              {currency === 'BRL' && paymentMethod === 'credit_card' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label className="block text-sm font-medium text-stone-700 mb-1">CEP *</label>
+                    <input type="text" value={cep} onChange={e => {
+                      let v = e.target.value.replace(/\D/g, '');
+                      if (v.length > 8) v = v.slice(0, 8);
+                      v = v.replace(/^(\d{5})(\d)/, '$1-$2');
+                      setCep(v);
+                      setErrors(prev => ({...prev, cep: ''}));
+                    }} className={`w-full p-3 bg-stone-50 border rounded-lg focus:ring-2 outline-none transition-all ${errors.cep ? 'border-red-500 focus:ring-red-200' : 'border-stone-200 focus:border-emerald-500 focus:ring-emerald-100'}`} placeholder="00000-000" />
+                    {errors.cep && <p className="text-red-500 text-xs mt-1">{errors.cep}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-stone-700 mb-1">Número *</label>
+                    <input type="text" value={numero} onChange={e => {
+                      setNumero(e.target.value);
+                      setErrors(prev => ({...prev, numero: ''}));
+                    }} className={`w-full p-3 bg-stone-50 border rounded-lg focus:ring-2 outline-none transition-all ${errors.numero ? 'border-red-500 focus:ring-red-200' : 'border-stone-200 focus:border-emerald-500 focus:ring-emerald-100'}`} placeholder="123" />
+                    {errors.numero && <p className="text-red-500 text-xs mt-1">{errors.numero}</p>}
+                  </div>
+                  {endereco && (
+                    <div className="md:col-span-2">
+                      <p className="text-sm text-stone-600 bg-stone-100 p-2 rounded-lg border border-stone-200">{endereco}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
