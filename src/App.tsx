@@ -4,7 +4,7 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 // Chave Pública do Stripe (Pegue no Painel da Reiki Time Academy)
-const stripePromise = loadStripe('pk_test_COLOQUE_A_CHAVE_PUBLICA_AQUI');
+const stripePromise = loadStripe('pk_test_51M4X8UJCAiZy2d8TZQEJiE0ElhFSKdqSmPhffxTWk5tzfeKuDxSjYY6t0FkkXFe7Kn31xoOrn8XfRiyOFSJLCK9Q00xTSxtHY7');
 
 const INTEREST_RATES: Record<number, number> = {
   1: 0, 2: 7, 3: 8, 4: 9, 5: 10, 6: 11,
