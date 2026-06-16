@@ -403,7 +403,7 @@ function CheckoutForm() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-600 mb-1">Nome impresso no cartão</label>
-                  <input value={ccName} onChange={e=>setCcName(e.target.value)} type="text" className={`w-full border ${errors.ccName ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="Ex: GABRIEL F ROMOR" />
+                  <input value={ccName} onChange={e=>setCcName(e.target.value)} type="text" className={`w-full border ${errors.ccName ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="Ex: JOAO DA SILVA" />
                   {errors.ccName && <p className="text-red-500 text-xs mt-1">{errors.ccName}</p>}
                 </div>
                 
