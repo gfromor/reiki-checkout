@@ -73,9 +73,9 @@ function CheckoutForm() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit_card');
   const [installments, setInstallments] = useState<number>(1);
   
-  const [nome, setNome] = useState('');
-  const [email, setEmail] = useState('');
-  const [telefone, setTelefone] = useState('');
+  const [nome, setNome] = useState(() => new URLSearchParams(window.location.search).get('name') || '');
+  const [email, setEmail] = useState(() => new URLSearchParams(window.location.search).get('email') || '');
+  const [telefone, setTelefone] = useState(() => new URLSearchParams(window.location.search).get('phone') || '');
   const [cpf, setCpf] = useState('');
   
   const [ccNumber, setCcNumber] = useState('');
