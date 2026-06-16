@@ -465,8 +465,8 @@ function CheckoutForm() {
             </h3>
             
             <div className="flex gap-4 mb-6">
-              <div className="w-20 h-20 bg-stone-100 rounded-lg border border-stone-200 flex-shrink-0 flex items-center justify-center">
-                <span className="text-xs text-stone-400 font-medium">Imagem</span>
+              <div className="w-20 h-20 rounded-lg border border-stone-200 flex-shrink-0 overflow-hidden bg-stone-100">
+                <img src="/curso-cuidar.png" alt="Capa do Curso" className="w-full h-full object-cover" />
               </div>
               <div>
                 <h4 className="font-semibold text-stone-800 leading-tight">{product.title}</h4>
