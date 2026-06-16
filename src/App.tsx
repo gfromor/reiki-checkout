@@ -216,7 +216,22 @@ function CheckoutForm() {
       const data = await response.json();
 
       if (!response.ok) {
-        setServerError(data.message || 'Erro no processamento da compra.');
+        // Tratar erro retornado como OK, mas sucesso=false
+        if (!data.sucesso && data.requires_action && data.client_secret && stripe) {
+          const { error: actionError } = await stripe.handleNextAction({
+            clientSecret: data.client_secret
+          });
+          
+          if (actionError) {
+            setServerError(actionError.message || 'Falha na autenticação do banco (3D Secure).');
+            setIsLoading(false);
+            return;
+          }
+          // Se passou pela autenticação, consideramos sucesso na tela (o webhook libera o curso)
+          setIsSuccess(true);
+        } else {
+          setServerError(data.message || 'Erro no processamento da compra.');
+        }
       } else {
         setIsSuccess(true);
         if (data.metodo === 'PIX') {
