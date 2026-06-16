@@ -16,7 +16,7 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     title: 'Formação Método CUIDAR', 
     subtitle: 'Acesso completo + Bônus exclusivos',
     brlPrice: 647.00, brlOriginal: 997.00,
-    usdPrice: 119.00, eurPrice: 109.00 
+    usdPrice: 129.00, eurPrice: 119.00 
   },
   'ebook': { 
     title: 'E-book Reiki Essencial', 
