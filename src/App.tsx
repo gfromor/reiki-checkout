@@ -167,8 +167,8 @@ function CheckoutForm() {
 
   useEffect(() => {
     if (couponCode) {
-      // Usa a URL de produção para a API
-      fetch(`https://reikitimeacademy.com.br/wp-json/reiki/v1/coupon?code=${couponCode}`)
+      // Usa a URL de produção para a API (EAD, onde o snippet backend-wpcode.php mora)
+      fetch(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/coupon?code=${couponCode}`)
         .then(res => res.json())
         .then(data => {
           if (data.sucesso) {
