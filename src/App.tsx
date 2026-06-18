@@ -11,30 +11,34 @@ const INTEREST_RATES: Record<number, number> = {
   7: 12, 8: 13, 9: 14, 10: 16, 11: 18, 12: 20
 };
 
-const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number }> = {
+const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number, image: string }> = {
   'cuidar': { 
     title: 'Formação Método CUIDAR', 
     subtitle: 'Acesso completo + Bônus exclusivos',
     brlPrice: 647.00, brlOriginal: 997.00,
-    usdPrice: 129.00, eurPrice: 119.00 
+    usdPrice: 129.00, eurPrice: 119.00,
+    image: '/curso-cuidar.png'
   },
   'cer': {
     title: 'Certificação Expert Reiki Completa',
     subtitle: 'Curso Expert Reiki V2 + Bônus Físicos e Digitais',
     brlPrice: 1997.00, brlOriginal: 5188.00,
-    usdPrice: 397.00, eurPrice: 347.00
+    usdPrice: 397.00, eurPrice: 347.00,
+    image: '/cer.png'
   },
   'infinity': {
     title: 'Método Infinity Reiki',
     subtitle: 'Acesso completo por 6 meses',
     brlPrice: 67.00, brlOriginal: 697.00,
-    usdPrice: 17.00, eurPrice: 17.00
+    usdPrice: 17.00, eurPrice: 17.00,
+    image: '/infinity.png'
   },
   'ebook': { 
     title: 'E-book Reiki Essencial', 
     subtitle: 'Download imediato (PDF)',
     brlPrice: 47.00, brlOriginal: 97.00,
-    usdPrice: 12.00, eurPrice: 11.00 
+    usdPrice: 12.00, eurPrice: 11.00,
+    image: '/curso-cuidar.png'
   }
 };
 
@@ -580,7 +584,7 @@ function CheckoutForm() {
             
             <div className="flex gap-4 mb-6">
               <div className="w-20 h-20 rounded-lg border border-stone-200 flex-shrink-0 overflow-hidden bg-stone-100">
-                <img src="/curso-cuidar.png" alt="Capa do Curso" className="w-full h-full object-cover" />
+                <img src={product.image} alt={product.title} className="w-full h-full object-cover" />
               </div>
               <div>
                 <h4 className="font-semibold text-stone-800 leading-tight">{product.title}</h4>
