@@ -69,7 +69,7 @@ const ORDER_BUMPS = [
   }
 ];
 
-type PaymentMethod = 'credit_card' | 'pix' | 'boleto';
+type PaymentMethod = 'credit_card' | 'pix' | 'boleto' | 'two_cards' | 'pix_and_card';
 type Currency = 'BRL' | 'USD' | 'EUR';
 
 function isValidCPF(cpf: string) {
@@ -125,6 +125,15 @@ function CheckoutForm() {
   const [ccName, setCcName] = useState('');
   const [ccExpiry, setCcExpiry] = useState('');
   const [ccCvv, setCcCvv] = useState('');
+
+  const [ccNumber2, setCcNumber2] = useState('');
+  const [ccName2, setCcName2] = useState('');
+  const [ccExpiry2, setCcExpiry2] = useState('');
+  const [ccCvv2, setCcCvv2] = useState('');
+  const [installments2, setInstallments2] = useState<number>(1);
+
+  const [pixEntryValue, setPixEntryValue] = useState<string>('');
+  const [card1EntryValue, setCard1EntryValue] = useState<string>('');
 
   const [cep, setCep] = useState('');
   const [endereco, setEndereco] = useState('');
@@ -224,9 +233,22 @@ function CheckoutForm() {
   })();
 
   const calculateTotal = () => {
-    if (currency === 'BRL' && paymentMethod === 'credit_card') {
-      const rate = INTEREST_RATES[installments] || 0;
-      return basePrice * (1 + rate / 100);
+    if (currency === 'BRL') {
+      if (paymentMethod === 'credit_card') {
+        const rate = INTEREST_RATES[installments] || 0;
+        return basePrice * (1 + rate / 100);
+      } else if (paymentMethod === 'two_cards') {
+        const val1 = Number(card1EntryValue) || 0;
+        const val2 = Math.max(0, basePrice - val1);
+        const rate1 = INTEREST_RATES[installments] || 0;
+        const rate2 = INTEREST_RATES[installments2] || 0;
+        return (val1 * (1 + rate1 / 100)) + (val2 * (1 + rate2 / 100));
+      } else if (paymentMethod === 'pix_and_card') {
+        const pixVal = Number(pixEntryValue) || 0;
+        const cardVal = Math.max(0, basePrice - pixVal);
+        const rate = INTEREST_RATES[installments] || 0;
+        return pixVal + (cardVal * (1 + rate / 100));
+      }
     }
     return basePrice;
   };
@@ -254,6 +276,22 @@ function CheckoutForm() {
       if (ccCvv.length < 3) newErrors.ccCvv = 'CVV inválido';
       if (cep.replace(/\D/g, '').length !== 8) newErrors.cep = 'CEP inválido';
       if (!numero) newErrors.numero = 'Número obrigatório';
+    }
+
+    if (currency === 'BRL' && (paymentMethod === 'two_cards' || paymentMethod === 'pix_and_card')) {
+      if (!isValidLuhn(ccNumber)) newErrors.ccNumber = 'Número do cartão inválido';
+      if (!ccName.includes(' ')) newErrors.ccName = 'Nome incompleto';
+      if (ccExpiry.length < 5) newErrors.ccExpiry = 'Validade incompleta';
+      if (ccCvv.length < 3) newErrors.ccCvv = 'CVV inválido';
+      if (cep.replace(/\D/g, '').length !== 8) newErrors.cep = 'CEP inválido';
+      if (!numero) newErrors.numero = 'Número obrigatório';
+      
+      if (paymentMethod === 'two_cards') {
+        if (!isValidLuhn(ccNumber2)) newErrors.ccNumber2 = 'Número do 2º cartão inválido';
+        if (!ccName2.includes(' ')) newErrors.ccName2 = 'Nome 2º cartão incompleto';
+        if (ccExpiry2.length < 5) newErrors.ccExpiry2 = 'Validade 2º cartão incompleta';
+        if (ccCvv2.length < 3) newErrors.ccCvv2 = 'CVV 2º cartão inválido';
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -303,6 +341,27 @@ function CheckoutForm() {
         payload.cc_number = ccNumber;
         payload.cc_expiry = ccExpiry;
         payload.cc_cvv = ccCvv;
+        payload.cep = cep.replace(/\D/g, '');
+        payload.numero = numero;
+    } else if (paymentMethod === 'two_cards') {
+        payload.cc_name = ccName;
+        payload.cc_number = ccNumber;
+        payload.cc_expiry = ccExpiry;
+        payload.cc_cvv = ccCvv;
+        payload.split_card1_value = Number(card1EntryValue) || 0;
+        payload.cc_name2 = ccName2;
+        payload.cc_number2 = ccNumber2;
+        payload.cc_expiry2 = ccExpiry2;
+        payload.cc_cvv2 = ccCvv2;
+        payload.parcelas2 = installments2;
+        payload.cep = cep.replace(/\D/g, '');
+        payload.numero = numero;
+    } else if (paymentMethod === 'pix_and_card') {
+        payload.cc_name = ccName;
+        payload.cc_number = ccNumber;
+        payload.cc_expiry = ccExpiry;
+        payload.cc_cvv = ccCvv;
+        payload.split_pix_value = Number(pixEntryValue) || 0;
         payload.cep = cep.replace(/\D/g, '');
         payload.numero = numero;
     }
@@ -483,62 +542,154 @@ function CheckoutForm() {
             </h2>
             
             {currency === 'BRL' && (
-              <div className="grid grid-cols-3 gap-2 md:gap-4 mb-6">
-                <button type="button" onClick={() => { setPaymentMethod('credit_card'); setInstallments(1); }} className={`p-3 md:p-4 border rounded-xl flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'credit_card' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
-                  <CreditCard className="w-6 h-6" />
-                  <span className="text-xs md:text-sm font-medium">Cartão</span>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-2 mb-6">
+                <button type="button" onClick={() => { setPaymentMethod('credit_card'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'credit_card' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
+                  <CreditCard className="w-5 h-5" />
+                  <span className="text-xs font-medium">Cartão</span>
                 </button>
-                <button type="button" onClick={() => { setPaymentMethod('pix'); setInstallments(1); }} className={`p-3 md:p-4 border rounded-xl flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'pix' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
-                  <QrCode className="w-6 h-6" />
-                  <span className="text-xs md:text-sm font-medium">Pix</span>
+                <button type="button" onClick={() => { setPaymentMethod('pix'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'pix' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
+                  <QrCode className="w-5 h-5" />
+                  <span className="text-xs font-medium">Pix</span>
                 </button>
-                <button type="button" onClick={() => { setPaymentMethod('boleto'); setInstallments(1); }} className={`p-3 md:p-4 border rounded-xl flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'boleto' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
-                  <Receipt className="w-6 h-6" />
-                  <span className="text-xs md:text-sm font-medium">Boleto à vista</span>
+                <button type="button" onClick={() => { setPaymentMethod('two_cards'); setInstallments(1); setInstallments2(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'two_cards' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
+                  <div className="flex -space-x-2"><CreditCard className="w-5 h-5" /><CreditCard className="w-5 h-5 opacity-50" /></div>
+                  <span className="text-[10px] md:text-xs font-medium text-center leading-tight">2 Cartões</span>
+                </button>
+                <button type="button" onClick={() => { setPaymentMethod('pix_and_card'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'pix_and_card' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
+                  <div className="flex -space-x-1"><QrCode className="w-5 h-5" /><CreditCard className="w-5 h-5 opacity-50" /></div>
+                  <span className="text-[10px] md:text-xs font-medium text-center leading-tight">Pix + Cartão</span>
+                </button>
+                <button type="button" onClick={() => { setPaymentMethod('boleto'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'boleto' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
+                  <Receipt className="w-5 h-5" />
+                  <span className="text-xs font-medium text-center leading-tight">Boleto</span>
                 </button>
               </div>
             )}
 
-            {currency === 'BRL' && paymentMethod === 'credit_card' && (
-              <div className="space-y-4 animate-in fade-in">
-                <div>
-                  <label className="block text-sm font-medium text-stone-600 mb-1">Número do Cartão</label>
-                  <input value={ccNumber} onChange={e=>setCcNumber(e.target.value)} type="text" className={`w-full border ${errors.ccNumber ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="0000 0000 0000 0000" />
-                  {errors.ccNumber && <p className="text-red-500 text-xs mt-1">{errors.ccNumber}</p>}
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-stone-600 mb-1">Validade</label>
-                    <input value={ccExpiry} onChange={e=>setCcExpiry(e.target.value)} type="text" className={`w-full border ${errors.ccExpiry ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="MM/AA" />
-                    {errors.ccExpiry && <p className="text-red-500 text-xs mt-1">{errors.ccExpiry}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-stone-600 mb-1">CVV</label>
-                    <input value={ccCvv} onChange={e=>setCcCvv(e.target.value)} type="text" className={`w-full border ${errors.ccCvv ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="123" />
-                    {errors.ccCvv && <p className="text-red-500 text-xs mt-1">{errors.ccCvv}</p>}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-stone-600 mb-1">Nome impresso no cartão</label>
-                  <input value={ccName} onChange={e=>setCcName(e.target.value)} type="text" className={`w-full border ${errors.ccName ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="Ex: JOAO DA SILVA" />
-                  {errors.ccName && <p className="text-red-500 text-xs mt-1">{errors.ccName}</p>}
-                </div>
+            {currency === 'BRL' && (paymentMethod === 'credit_card' || paymentMethod === 'two_cards' || paymentMethod === 'pix_and_card') && (
+              <div className="space-y-6 animate-in fade-in">
                 
-                <div>
-                  <label className="block text-sm font-medium text-stone-600 mb-1">Parcelamento</label>
-                  <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
-                    {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
-                      const rate = INTEREST_RATES[num] || 0;
-                      const instTotal = basePrice * (1 + rate / 100);
-                      const instValue = instTotal / num;
-                      return (
-                        <option key={num} value={num}>
-                          {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} {num === 1 ? 'sem juros' : ''}
-                        </option>
-                      )
-                    })}
-                  </select>
+                {paymentMethod === 'pix_and_card' && (
+                  <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl">
+                    <h3 className="font-bold text-emerald-800 mb-3 flex items-center gap-2"><QrCode className="w-5 h-5"/> Valor no Pix</h3>
+                    <div>
+                      <label className="block text-sm font-medium text-emerald-700 mb-1">Quanto deseja pagar no Pix?</label>
+                      <input value={pixEntryValue} onChange={e => {
+                         let val = e.target.value.replace(/[^0-9.]/g, '');
+                         setPixEntryValue(val);
+                      }} type="text" className="w-full border border-emerald-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
+                      <p className="text-xs text-emerald-600 mt-2">O restante será cobrado no cartão de crédito abaixo.</p>
+                    </div>
+                  </div>
+                )}
+
+                {paymentMethod === 'two_cards' && (
+                  <div className="bg-stone-50 border border-stone-200 p-4 rounded-xl">
+                    <h3 className="font-bold text-stone-800 mb-3 flex items-center gap-2"><CreditCard className="w-5 h-5"/> Divisão de Valores</h3>
+                    <div>
+                      <label className="block text-sm font-medium text-stone-600 mb-1">Quanto cobrar no 1º Cartão?</label>
+                      <input value={card1EntryValue} onChange={e => {
+                         let val = e.target.value.replace(/[^0-9.]/g, '');
+                         setCard1EntryValue(val);
+                      }} type="text" className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-stone-500 outline-none" placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
+                      <p className="text-xs text-stone-500 mt-2">O restante será cobrado no 2º cartão automaticamente.</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-white border border-stone-200 p-4 rounded-xl space-y-4">
+                  <h3 className="font-bold text-stone-800 flex items-center gap-2">
+                    <CreditCard className="w-5 h-5"/> 
+                    {paymentMethod === 'two_cards' ? 'Dados do 1º Cartão' : 'Dados do Cartão'}
+                  </h3>
+                  <div>
+                    <label className="block text-sm font-medium text-stone-600 mb-1">Número do Cartão</label>
+                    <input value={ccNumber} onChange={e=>setCcNumber(e.target.value)} type="text" className={`w-full border ${errors.ccNumber ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="0000 0000 0000 0000" />
+                    {errors.ccNumber && <p className="text-red-500 text-xs mt-1">{errors.ccNumber}</p>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-stone-600 mb-1">Validade</label>
+                      <input value={ccExpiry} onChange={e=>setCcExpiry(e.target.value)} type="text" className={`w-full border ${errors.ccExpiry ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="MM/AA" />
+                      {errors.ccExpiry && <p className="text-red-500 text-xs mt-1">{errors.ccExpiry}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-stone-600 mb-1">CVV</label>
+                      <input value={ccCvv} onChange={e=>setCcCvv(e.target.value)} type="text" className={`w-full border ${errors.ccCvv ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="123" />
+                      {errors.ccCvv && <p className="text-red-500 text-xs mt-1">{errors.ccCvv}</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-stone-600 mb-1">Nome impresso no cartão</label>
+                    <input value={ccName} onChange={e=>setCcName(e.target.value)} type="text" className={`w-full border ${errors.ccName ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="Ex: JOAO DA SILVA" />
+                    {errors.ccName && <p className="text-red-500 text-xs mt-1">{errors.ccName}</p>}
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-stone-600 mb-1">Parcelamento</label>
+                    <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
+                      {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
+                        const rate = INTEREST_RATES[num] || 0;
+                        let valToInstallment = basePrice;
+                        if (paymentMethod === 'two_cards') valToInstallment = Number(card1EntryValue) || 0;
+                        if (paymentMethod === 'pix_and_card') valToInstallment = Math.max(0, basePrice - (Number(pixEntryValue) || 0));
+                        
+                        const instTotal = valToInstallment * (1 + rate / 100);
+                        const instValue = instTotal / num;
+                        return (
+                          <option key={num} value={num}>
+                            {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} {num === 1 ? 'sem juros' : ''}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </div>
                 </div>
+
+                {paymentMethod === 'two_cards' && (
+                  <div className="bg-white border border-stone-200 p-4 rounded-xl space-y-4">
+                    <h3 className="font-bold text-stone-800 flex items-center gap-2"><CreditCard className="w-5 h-5"/> Dados do 2º Cartão</h3>
+                    <div>
+                      <label className="block text-sm font-medium text-stone-600 mb-1">Número do Cartão</label>
+                      <input value={ccNumber2} onChange={e=>setCcNumber2(e.target.value)} type="text" className={`w-full border ${errors.ccNumber2 ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="0000 0000 0000 0000" />
+                      {errors.ccNumber2 && <p className="text-red-500 text-xs mt-1">{errors.ccNumber2}</p>}
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-stone-600 mb-1">Validade</label>
+                        <input value={ccExpiry2} onChange={e=>setCcExpiry2(e.target.value)} type="text" className={`w-full border ${errors.ccExpiry2 ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="MM/AA" />
+                        {errors.ccExpiry2 && <p className="text-red-500 text-xs mt-1">{errors.ccExpiry2}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-stone-600 mb-1">CVV</label>
+                        <input value={ccCvv2} onChange={e=>setCcCvv2(e.target.value)} type="text" className={`w-full border ${errors.ccCvv2 ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="123" />
+                        {errors.ccCvv2 && <p className="text-red-500 text-xs mt-1">{errors.ccCvv2}</p>}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-stone-600 mb-1">Nome impresso no cartão</label>
+                      <input value={ccName2} onChange={e=>setCcName2(e.target.value)} type="text" className={`w-full border ${errors.ccName2 ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="Ex: JOAO DA SILVA" />
+                      {errors.ccName2 && <p className="text-red-500 text-xs mt-1">{errors.ccName2}</p>}
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-stone-600 mb-1">Parcelamento (2º Cartão)</label>
+                      <select value={installments2} onChange={(e) => setInstallments2(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
+                        {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
+                          const rate = INTEREST_RATES[num] || 0;
+                          const valToInstallment = Math.max(0, basePrice - (Number(card1EntryValue) || 0));
+                          const instTotal = valToInstallment * (1 + rate / 100);
+                          const instValue = instTotal / num;
+                          return (
+                            <option key={num} value={num}>
+                              {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} {num === 1 ? 'sem juros' : ''}
+                            </option>
+                          )
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             

@@ -10,6 +10,82 @@ define('REIKI_ASAAS_API_KEY', ''); // Chave removida
 define('REIKI_ASAAS_WEBHOOK_TOKEN', ''); // Token removido
 define('ASAAS_IS_SANDBOX', false);
 
+// =========================================================================
+// HELPER FUNÇÕES ASAAS (PAYMENTS, AUTH & CAPTURE)
+// =========================================================================
+function reiki_asaas_request($method, $endpoint, $body = null) {
+    $base_url = ASAAS_IS_SANDBOX ? 'https://sandbox.asaas.com/api/v3' : 'https://api.asaas.com/v3';
+    $headers = array('Content-Type' => 'application/json', 'access_token' => REIKI_ASAAS_API_KEY);
+    $args = array('headers' => $headers, 'method' => $method, 'timeout' => 30);
+    if ($body) $args['body'] = json_encode($body);
+    return wp_remote_request($base_url . $endpoint, $args);
+}
+
+function reiki_asaas_cancelar($payment_id) {
+    return reiki_asaas_request('DELETE', '/payments/' . $payment_id);
+}
+
+function reiki_asaas_capturar($payment_id) {
+    return reiki_asaas_request('POST', '/payments/' . $payment_id . '/captureAuthorized');
+}
+
+function reiki_asaas_montar_cartao($card_data, $valor_total, $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero) {
+    $parcelas = intval($card_data['parcelas']);
+    $interest_rates = array(1 => 0, 2 => 7, 3 => 8, 4 => 9, 5 => 10, 6 => 12, 7 => 13, 8 => 14, 9 => 15, 10 => 16, 11 => 18, 12 => 20);
+    $rate = isset($interest_rates[$parcelas]) ? $interest_rates[$parcelas] : 0;
+    $valor_com_juros = $valor_total * (1 + $rate / 100);
+    
+    $cc_expiry = sanitize_text_field( $card_data['cc_expiry'] );
+    $exp_parts = explode('/', $cc_expiry);
+    
+    return array(
+        'installmentCount' => $parcelas,
+        'installmentValue' => round($valor_com_juros / $parcelas, 2),
+        'creditCard' => array(
+            'holderName' => sanitize_text_field( $card_data['cc_name'] ),
+            'number' => preg_replace('/[^0-9]/', '', $card_data['cc_number']),
+            'expiryMonth' => trim($exp_parts[0]),
+            'expiryYear' => (strlen(trim($exp_parts[1])) == 2) ? '20'.trim($exp_parts[1]) : trim($exp_parts[1]),
+            'ccv' => sanitize_text_field( $card_data['cc_cvv'] )
+        ),
+        'creditCardHolderInfo' => array(
+            'name' => $nome, 'email' => $email, 'cpfCnpj' => preg_replace('/[^0-9]/', '', $cpf),
+            'postalCode' => sanitize_text_field( $cep ),
+            'addressNumber' => sanitize_text_field( $numero ),
+            'phone' => preg_replace('/[^0-9]/', '', $telefone),
+            'remoteIp' => $ip_cliente
+        )
+    );
+}
+
+function reiki_asaas_cobranca($customer_id, $billing_type, $valor, $vencimento, $descricao, $external_ref, $cartao_extra = null, $authorize_only = false) {
+    $body = array(
+        'customer' => $customer_id,
+        'billingType' => $billing_type,
+        'value' => $valor,
+        'dueDate' => $vencimento,
+        'description' => $descricao,
+        'externalReference' => $external_ref
+    );
+    if ($authorize_only) {
+        $body['authorizeOnly'] = true;
+    }
+    if ($cartao_extra) {
+        foreach ($cartao_extra as $k => $v) {
+            $body[$k] = $v;
+        }
+    }
+    $response = reiki_asaas_request('POST', '/payments', $body);
+    if (is_wp_error($response)) {
+        return new WP_Error('erro_api', 'Falha ao conectar com banco.', array('status' => 500));
+    }
+    $body_resp = json_decode(wp_remote_retrieve_body($response), true);
+    if (isset($body_resp['errors'])) {
+        return new WP_Error('recusado', $body_resp['errors'][0]['description'], array('status' => 400));
+    }
+    return $body_resp;
+}
+
 // 2. Configurações Iniciais do STRIPE
 define('REIKI_STRIPE_SECRET_KEY', ''); // Chave removida
 define('REIKI_STRIPE_WEBHOOK_SECRET', ''); // <--- Coloque o Signing Secret (whsec_...) aqui
@@ -234,77 +310,102 @@ function processar_checkout_universal( WP_REST_Request $request ) {
         $cpf = sanitize_text_field( $params['cpf'] );
         $telefone = sanitize_text_field( $params['telefone'] );
         $metodo = sanitize_text_field( $params['metodo'] );
-        $parcelas = intval( $params['parcelas'] );
+        $cep = sanitize_text_field( $params['cep'] );
+        $numero = sanitize_text_field( $params['numero'] );
 
         $base_url = ASAAS_IS_SANDBOX ? 'https://sandbox.asaas.com/api/v3' : 'https://api.asaas.com/v3';
         $headers = array('Content-Type' => 'application/json', 'access_token' => REIKI_ASAAS_API_KEY);
 
         $customer_id = buscar_ou_criar_cliente_asaas($nome, $email, $cpf, $telefone, $base_url, $headers);
         if ( is_wp_error( $customer_id ) ) return $customer_id;
-
-        $billing_type = strtoupper($metodo);
         
-        $body = array(
-            'customer' => $customer_id,
-            'billingType' => $billing_type,
-            'value' => $valor_total,
-            'dueDate' => date('Y-m-d', strtotime('+2 days')),
-            'description' => $descricao_compra,
-            'externalReference' => $wp_user_id . '|' . $produto_id . '|' . implode(',', $bumps_selecionados) . '|' . $cupom_id_queimado
-        );
-
-        if ($billing_type == 'CREDIT_CARD') {
-            $body['dueDate'] = date('Y-m-d');
-            $body['installmentCount'] = $parcelas;
-            
-            // Aplica tabela de juros para cartão parcelado
-            $interest_rates = array(1 => 0, 2 => 7, 3 => 8, 4 => 9, 5 => 10, 6 => 12, 7 => 13, 8 => 14, 9 => 15, 10 => 16, 11 => 18, 12 => 20);
-            $rate = isset($interest_rates[$parcelas]) ? $interest_rates[$parcelas] : 0;
-            $valor_com_juros = $valor_total * (1 + $rate / 100);
-            $body['installmentValue'] = round($valor_com_juros / $parcelas, 2);
-            
-            $cc_expiry = sanitize_text_field( $params['cc_expiry'] );
-            $exp_parts = explode('/', $cc_expiry);
-            $body['creditCard'] = array(
-                'holderName' => sanitize_text_field( $params['cc_name'] ),
-                'number' => preg_replace('/[^0-9]/', '', $params['cc_number']),
-                'expiryMonth' => trim($exp_parts[0]),
-                'expiryYear' => (strlen(trim($exp_parts[1])) == 2) ? '20'.trim($exp_parts[1]) : trim($exp_parts[1]),
-                'ccv' => sanitize_text_field( $params['cc_cvv'] )
-            );
-            $body['creditCardHolderInfo'] = array(
-                'name' => $nome, 'email' => $email, 'cpfCnpj' => preg_replace('/[^0-9]/', '', $cpf),
-                'postalCode' => sanitize_text_field( $params['cep'] ),
-                'addressNumber' => sanitize_text_field( $params['numero'] ),
-                'phone' => preg_replace('/[^0-9]/', '', $telefone),
-                'remoteIp' => $ip_cliente
-            );
-        }
-
-        $response = wp_remote_post( $base_url . '/payments', array('headers' => $headers, 'body' => json_encode($body), 'timeout' => 30) );
-        if ( is_wp_error( $response ) ) return new WP_Error( 'erro_api', 'Falha ao conectar com banco.', array( 'status' => 500 ) );
-
-        $body_resp = json_decode( wp_remote_retrieve_body( $response ), true );
-        if ( isset($body_resp['errors']) ) return new WP_Error( 'recusado', $body_resp['errors'][0]['description'], array( 'status' => 400 ) );
-
+        $descricao_compra_final = $descricao_compra;
+        $external_ref_base = $wp_user_id . '|' . $produto_id . '|' . implode(',', $bumps_selecionados) . '|' . $cupom_id_queimado;
+        
         $retorno['sucesso'] = true;
-        $retorno['metodo'] = $billing_type;
-        $retorno['status_venda'] = $body_resp['status'];
+        $retorno['metodo'] = $metodo;
 
-        if ($billing_type == 'PIX') {
-            $pix_resp = wp_remote_get( $base_url . '/payments/' . $body_resp['id'] . '/pixQrCode', array('headers' => $headers) );
-            $pix_data = json_decode( wp_remote_retrieve_body( $pix_resp ), true );
+        if ($metodo === 'two_cards') {
+            $cards = $params['cards'];
+            if (count($cards) !== 2) return new WP_Error('erro_dados', 'Dados dos dois cartões incompletos.', array('status' => 400));
+            
+            // Cartão 1
+            $c1_data = reiki_asaas_montar_cartao($cards[0], $cards[0]['value'], $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero);
+            $resp1 = reiki_asaas_cobranca($customer_id, 'CREDIT_CARD', $cards[0]['value'], date('Y-m-d'), $descricao_compra_final . ' (Cartão 1/2)', $external_ref_base, $c1_data, true);
+            if (is_wp_error($resp1)) return $resp1;
+            
+            // Cartão 2
+            $c2_data = reiki_asaas_montar_cartao($cards[1], $cards[1]['value'], $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero);
+            $resp2 = reiki_asaas_cobranca($customer_id, 'CREDIT_CARD', $cards[1]['value'], date('Y-m-d'), $descricao_compra_final . ' (Cartão 2/2)', $external_ref_base, $c2_data, true);
+            
+            if (is_wp_error($resp2)) {
+                reiki_asaas_cancelar($resp1['id']);
+                return $resp2;
+            }
+            
+            // Ambos autorizados! Captura os dois!
+            reiki_asaas_capturar($resp1['id']);
+            reiki_asaas_capturar($resp2['id']);
+            
+            $retorno['status_venda'] = 'CONFIRMED';
+            
+            conceder_acesso_curso($wp_user_id, $produto_id);
+            if (!empty($bumps_selecionados)) processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+            if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) wc_update_coupon_usage_counts( $cupom_id_queimado );
+            
+        } elseif ($metodo === 'pix_and_card') {
+            $pix_val = floatval($params['pix_value']);
+            $card = $params['card'];
+            
+            // Cartão primeiro (Authorize Only)
+            $c_data = reiki_asaas_montar_cartao($card, $card['value'], $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero);
+            $resp_card = reiki_asaas_cobranca($customer_id, 'CREDIT_CARD', $card['value'], date('Y-m-d'), $descricao_compra_final . ' (Parte Cartão)', $external_ref_base, $c_data, true);
+            if (is_wp_error($resp_card)) return $resp_card; // Falhou o cartão, nem gera o PIX
+            
+            // Cartão pré-autorizado! Esconde o ID do Cartão na externalReference do PIX
+            $pix_external_ref = $external_ref_base . '|' . $resp_card['id']; 
+            
+            $resp_pix = reiki_asaas_cobranca($customer_id, 'PIX', $pix_val, date('Y-m-d', strtotime('+1 days')), $descricao_compra_final . ' (Parte PIX)', $pix_external_ref);
+            if (is_wp_error($resp_pix)) {
+                reiki_asaas_cancelar($resp_card['id']);
+                return $resp_pix;
+            }
+            
+            $pix_qr = wp_remote_get( $base_url . '/payments/' . $resp_pix['id'] . '/pixQrCode', array('headers' => $headers) );
+            $pix_data = json_decode( wp_remote_retrieve_body( $pix_qr ), true );
             $retorno['pix_qrcode'] = $pix_data['encodedImage'];
             $retorno['pix_copia_cola'] = $pix_data['payload'];
-        }
+            $retorno['status_venda'] = 'PENDING';
 
-        if ( in_array($body_resp['status'], array('CONFIRMED', 'RECEIVED')) ) {
-            conceder_acesso_curso($wp_user_id, $produto_id);
-            if (!empty($bumps_selecionados)) {
-                processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+        } else {
+            // Fluxo NORMAL
+            $billing_type = strtoupper($metodo);
+            $cartao_extra = null;
+            $due_date = date('Y-m-d', strtotime('+2 days'));
+            if ($billing_type === 'PIX') $due_date = date('Y-m-d', strtotime('+1 days'));
+            
+            if ($billing_type === 'CREDIT_CARD') {
+                $due_date = date('Y-m-d');
+                $params['parcelas'] = intval($params['parcelas']);
+                $cartao_extra = reiki_asaas_montar_cartao($params, $valor_total, $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero);
             }
-            if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) {
-                wc_update_coupon_usage_counts( $cupom_id_queimado );
+            
+            $resp = reiki_asaas_cobranca($customer_id, $billing_type, $valor_total, $due_date, $descricao_compra_final, $external_ref_base, $cartao_extra, false);
+            if (is_wp_error($resp)) return $resp;
+            
+            $retorno['status_venda'] = $resp['status'];
+            
+            if ($billing_type == 'PIX') {
+                $pix_qr = wp_remote_get( $base_url . '/payments/' . $resp['id'] . '/pixQrCode', array('headers' => $headers) );
+                $pix_data = json_decode( wp_remote_retrieve_body( $pix_qr ), true );
+                $retorno['pix_qrcode'] = $pix_data['encodedImage'];
+                $retorno['pix_copia_cola'] = $pix_data['payload'];
+            }
+
+            if ( in_array($resp['status'], array('CONFIRMED', 'RECEIVED')) ) {
+                conceder_acesso_curso($wp_user_id, $produto_id);
+                if (!empty($bumps_selecionados)) processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+                if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) wc_update_coupon_usage_counts( $cupom_id_queimado );
             }
         }
 
@@ -394,6 +495,13 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
             if ( count($parts) >= 2 ) {
                 $wp_user_id = intval($parts[0]);
                 $produto_id = sanitize_text_field($parts[1]);
+                
+                // Pagamento Híbrido: Captura o cartão se existir ID atrelado
+                if (isset($parts[4]) && !empty($parts[4])) {
+                    $capture_card_id = sanitize_text_field($parts[4]);
+                    reiki_asaas_capturar($capture_card_id);
+                }
+
                 conceder_acesso_curso($wp_user_id, $produto_id);
                 
                 if (isset($parts[2]) && !empty($parts[2])) {
