@@ -162,6 +162,29 @@ function CheckoutForm() {
   const productId = searchParams.get('produto') || 'cuidar';
   const product = PRODUCTS[productId] || PRODUCTS['cuidar'];
   
+  const [couponCode, setCouponCode] = useState<string | null>(searchParams.get('cupom'));
+  const [couponDiscount, setCouponDiscount] = useState<{ type: string, amount: number } | null>(null);
+
+  useEffect(() => {
+    if (couponCode) {
+      // Usa a URL de produção para a API
+      fetch(`https://reikitimeacademy.com.br/wp-json/reiki/v1/coupon?code=${couponCode}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.sucesso) {
+            setCouponDiscount({ type: data.tipo, amount: data.valor });
+          } else {
+            console.warn("Cupom inválido:", data.message);
+            setCouponCode(null);
+          }
+        })
+        .catch(err => {
+            console.error("Erro ao validar cupom", err);
+            setCouponCode(null);
+        });
+    }
+  }, []);
+  
   const getProductPrice = () => {
     if (currency === 'USD') return product.usdPrice;
     if (currency === 'EUR') return product.eurPrice;
@@ -182,6 +205,17 @@ function CheckoutForm() {
         }
       });
     }
+    
+    if (couponDiscount) {
+       if (couponDiscount.type === 'percent') {
+          price = price - (price * (couponDiscount.amount / 100));
+       } else if (currency === 'BRL') {
+          // fixed discounts
+          price = price - couponDiscount.amount;
+       }
+       if (price < 0) price = 0;
+    }
+    
     return price;
   })();
 
@@ -234,7 +268,8 @@ function CheckoutForm() {
       currency: currency,
       parcelas: installments,
       metodo: paymentMethod,
-      bumps: selectedBumps
+      bumps: selectedBumps,
+      cupom: couponCode || ''
     };
 
     // 2. Se for Stripe, geramos o Token primeiro
@@ -556,12 +591,22 @@ function CheckoutForm() {
             <div className="space-y-3 mb-6">
               <div className="flex justify-between text-sm text-stone-600">
                 <span>Valor com desconto</span>
-                <span>
+                <span className={couponDiscount ? 'line-through text-stone-400' : ''}>
                   {currency === 'BRL' && productPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   {currency === 'USD' && productPrice.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                   {currency === 'EUR' && productPrice.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
                 </span>
               </div>
+              {couponDiscount && couponCode && (
+                <div className="flex justify-between text-sm text-emerald-600 font-medium animate-in fade-in slide-in-from-top-2">
+                  <span>🎟️ Cupom aplicado ({couponCode})</span>
+                  <span>
+                    {couponDiscount.type === 'percent' 
+                      ? `- ${couponDiscount.amount}%` 
+                      : (currency === 'BRL' ? `- ${couponDiscount.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : '')}
+                  </span>
+                </div>
+              )}
               {currency === 'BRL' && paymentMethod === 'credit_card' && installments > 1 && (
                 <div className="flex justify-between text-sm text-amber-600">
                   <span>Juros de parcelamento ({installments}x)</span>

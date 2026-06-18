@@ -60,7 +60,58 @@ add_action( 'rest_api_init', function () {
         'callback' => 'processar_webhook_stripe',
         'permission_callback' => '__return_true'
     ) );
+    register_rest_route( 'reiki/v1', '/coupon', array(
+        'methods' => 'GET, OPTIONS',
+        'callback' => 'validar_cupom_woocommerce',
+        'permission_callback' => '__return_true'
+    ) );
 } );
+
+// =========================================================================
+// ROTA DE CUPONS
+// =========================================================================
+function validar_cupom_woocommerce( WP_REST_Request $request ) {
+    $allowed_origins = array(
+        'https://checkout.reikitimeacademy.com.br',
+        'https://reiki-checkout.pages.dev',
+        'http://localhost:5173'
+    );
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+    if (in_array($origin, $allowed_origins)) {
+        header("Access-Control-Allow-Origin: " . $origin);
+    }
+    header("Access-Control-Allow-Methods: GET, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type, Authorization");
+
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
+        return rest_ensure_response( array('status' => 'ok') );
+    }
+
+    if ( !class_exists('WC_Coupon') ) {
+        return new WP_Error( 'sem_woo', 'WooCommerce não ativo', array( 'status' => 500 ) );
+    }
+
+    $codigo = sanitize_text_field( $request->get_param('code') );
+    if ( empty($codigo) ) {
+        return new WP_Error( 'erro_codigo', 'Código não fornecido', array( 'status' => 400 ) );
+    }
+
+    $coupon = new WC_Coupon( $codigo );
+    if ( !$coupon->get_id() ) {
+        return new WP_Error( 'invalido', 'Cupom inválido', array( 'status' => 404 ) );
+    }
+
+    if ( !$coupon->is_valid() ) {
+        return new WP_Error( 'invalido', strip_tags($coupon->get_error_message()), array( 'status' => 400 ) );
+    }
+
+    return rest_ensure_response( array(
+        'sucesso' => true,
+        'codigo' => $coupon->get_code(),
+        'tipo' => $coupon->get_discount_type(), 
+        'valor' => floatval( $coupon->get_amount() )
+    ) );
+}
 
 // =========================================================================
 // 1. CHECKOUT FRONTEND
@@ -115,6 +166,9 @@ function processar_checkout_universal( WP_REST_Request $request ) {
         $valor_total = 0;
     }
 
+    $cupom_aplicado = sanitize_text_field( $params['cupom'] ?? '' );
+    $cupom_id_queimado = 0;
+
     foreach ($bumps_selecionados as $bump_id) {
         if (isset($bumps_config[$bump_id])) {
             $nomes_comprados[] = $bumps_config[$bump_id]['nome'];
@@ -125,6 +179,29 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             } else {
                 $valor_total += $bumps_config[$bump_id]['brl'];
             }
+        }
+    }
+
+    if ( !empty($cupom_aplicado) && class_exists('WC_Coupon') ) {
+        $coupon = new WC_Coupon( $cupom_aplicado );
+        if ( $coupon->get_id() && $coupon->is_valid() ) {
+            $tipo_desc = $coupon->get_discount_type();
+            $valor_desc = floatval( $coupon->get_amount() );
+            if ( $tipo_desc === 'percent' ) {
+                $valor_total = $valor_total - ($valor_total * ($valor_desc / 100));
+            } else {
+                // Fixed discounts are only safe to apply exactly in the base currency (BRL). 
+                // If it's USD or EUR, applying a fixed BRL number as USD is dangerous, 
+                // so we only apply it if the currency is BRL or if you want to force it.
+                if ( $currency === 'brl' ) {
+                    $valor_total = $valor_total - $valor_desc;
+                } else {
+                    // Pra moedas estrangeiras, cupons fixos não rolam por segurança de conversão, só em porcentagem.
+                    // Vamos ignorar silenciosamente.
+                }
+            }
+            if ($valor_total < 0) $valor_total = 0;
+            $cupom_id_queimado = $coupon->get_id();
         }
     }
 
@@ -173,7 +250,7 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             'value' => $valor_total,
             'dueDate' => date('Y-m-d', strtotime('+2 days')),
             'description' => $descricao_compra,
-            'externalReference' => $wp_user_id . '|' . $produto_id . '|' . implode(',', $bumps_selecionados)
+            'externalReference' => $wp_user_id . '|' . $produto_id . '|' . implode(',', $bumps_selecionados) . '|' . $cupom_id_queimado
         );
 
         if ($billing_type == 'CREDIT_CARD') {
@@ -226,6 +303,9 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             if (!empty($bumps_selecionados)) {
                 processar_acesso_bumps($wp_user_id, $bumps_selecionados);
             }
+            if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) {
+                wc_update_coupon_usage_counts( $cupom_id_queimado );
+            }
         }
 
     // ================== FLUXO STRIPE (INTERNACIONAL) ==================
@@ -251,7 +331,8 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             'receipt_email' => $email,
             'metadata[wp_user_id]' => $wp_user_id,
             'metadata[produto_id]' => $produto_id,
-            'metadata[bumps]' => implode(',', $bumps_selecionados)
+            'metadata[bumps]' => implode(',', $bumps_selecionados),
+            'metadata[cupom_id]' => $cupom_id_queimado
         ));
 
         $response = wp_remote_post( 'https://api.stripe.com/v1/payment_intents', array(
@@ -274,6 +355,9 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             conceder_acesso_curso($wp_user_id, $produto_id);
             if (!empty($bumps_selecionados)) {
                 processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+            }
+            if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) {
+                wc_update_coupon_usage_counts( $cupom_id_queimado );
             }
         } else if ( $body_resp['status'] === 'requires_action' ) {
             $retorno['sucesso'] = false;
@@ -315,6 +399,13 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
                 if (isset($parts[2]) && !empty($parts[2])) {
                     $bumps_selecionados = explode(',', $parts[2]);
                     processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+                }
+
+                if (isset($parts[3]) && !empty($parts[3])) {
+                    $cupom_id_queimado = intval($parts[3]);
+                    if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) {
+                        wc_update_coupon_usage_counts( $cupom_id_queimado );
+                    }
                 }
             }
         }
@@ -372,6 +463,13 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
             if (!empty($payment_intent['metadata']['bumps'])) {
                 $bumps_selecionados = explode(',', $payment_intent['metadata']['bumps']);
                 processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+            }
+
+            if (!empty($payment_intent['metadata']['cupom_id'])) {
+                $cupom_id_queimado = intval($payment_intent['metadata']['cupom_id']);
+                if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) {
+                    wc_update_coupon_usage_counts( $cupom_id_queimado );
+                }
             }
         }
     }
