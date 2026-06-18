@@ -31,7 +31,7 @@ function reiki_asaas_capturar($payment_id) {
 
 function reiki_asaas_montar_cartao($card_data, $valor_total, $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero) {
     $parcelas = intval($card_data['parcelas']);
-    $interest_rates = array(1 => 0, 2 => 7, 3 => 8, 4 => 9, 5 => 10, 6 => 12, 7 => 13, 8 => 14, 9 => 15, 10 => 16, 11 => 18, 12 => 20);
+    $interest_rates = array(1 => 0, 2 => 7, 3 => 8, 4 => 9, 5 => 10, 6 => 11, 7 => 13, 8 => 14, 9 => 15, 10 => 16, 11 => 18, 12 => 20);
     $rate = isset($interest_rates[$parcelas]) ? $interest_rates[$parcelas] : 0;
     $valor_com_juros = $valor_total * (1 + $rate / 100);
     
@@ -113,6 +113,13 @@ function get_reiki_products() {
             'preco_brl' => 67.00,
             'preco_usd' => 17.00,
             'preco_eur' => 17.00
+        ),
+        'ebook' => array(
+            'nome' => 'Ebook',
+            'membership_id' => 0, // Ajuste para o ID caso exista, ou 0
+            'preco_brl' => 29.90,
+            'preco_usd' => 6.00,
+            'preco_eur' => 6.00
         )
     );
 }
@@ -149,8 +156,7 @@ add_action( 'rest_api_init', function () {
 function validar_cupom_woocommerce( WP_REST_Request $request ) {
     $allowed_origins = array(
         'https://checkout.reikitimeacademy.com.br',
-        'https://reiki-checkout.pages.dev',
-        'http://localhost:5173'
+        'https://reiki-checkout.pages.dev'
     );
     $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
     if (in_array($origin, $allowed_origins)) {
@@ -329,6 +335,11 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             $cards = $params['cards'];
             if (count($cards) !== 2) return new WP_Error('erro_dados', 'Dados dos dois cartões incompletos.', array('status' => 400));
             
+            $soma_cartoes = floatval($cards[0]['value']) + floatval($cards[1]['value']);
+            if (abs($soma_cartoes - $valor_total) > 0.05) {
+                return new WP_Error('erro_valor', 'A soma dos cartões não confere com o valor total.', array('status' => 400));
+            }
+            
             // Cartão 1
             $c1_data = reiki_asaas_montar_cartao($cards[0], $cards[0]['value'], $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero);
             $resp1 = reiki_asaas_cobranca($customer_id, 'CREDIT_CARD', $cards[0]['value'], date('Y-m-d'), $descricao_compra_final . ' (Cartão 1/2)', $external_ref_base, $c1_data, true);
@@ -344,8 +355,14 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             }
             
             // Ambos autorizados! Captura os dois!
-            reiki_asaas_capturar($resp1['id']);
-            reiki_asaas_capturar($resp2['id']);
+            $cap1 = reiki_asaas_capturar($resp1['id']);
+            $cap2 = reiki_asaas_capturar($resp2['id']);
+            
+            if (is_wp_error($cap1) || is_wp_error($cap2)) {
+                 // Num cenário real, se um falhar, tentaria reverter o outro. 
+                 // Vamos deixar um error_log caso um dos cartões autorizados falhe na captura imediata.
+                 error_log("ALERTA CRITICO: Falha ao capturar um dos dois cartões pré-autorizados. {$resp1['id']} / {$resp2['id']}");
+            }
             
             $retorno['status_venda'] = 'CONFIRMED';
             
@@ -356,6 +373,11 @@ function processar_checkout_universal( WP_REST_Request $request ) {
         } elseif ($metodo === 'pix_and_card') {
             $pix_val = floatval($params['pix_value']);
             $card = $params['card'];
+            
+            $soma_pix_cartao = $pix_val + floatval($card['value']);
+            if (abs($soma_pix_cartao - $valor_total) > 0.05) {
+                return new WP_Error('erro_valor', 'A soma do PIX e Cartão não confere com o valor total.', array('status' => 400));
+            }
             
             // Cartão primeiro (Authorize Only)
             $c_data = reiki_asaas_montar_cartao($card, $card['value'], $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero);
@@ -499,7 +521,10 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
                 // Pagamento Híbrido: Captura o cartão se existir ID atrelado
                 if (isset($parts[4]) && !empty($parts[4])) {
                     $capture_card_id = sanitize_text_field($parts[4]);
-                    reiki_asaas_capturar($capture_card_id);
+                    $cap_result = reiki_asaas_capturar($capture_card_id);
+                    if (is_wp_error($cap_result)) {
+                        error_log('ALERTA: Captura do cartão ' . $capture_card_id . ' falhou no webhook Pix+Cartão');
+                    }
                 }
 
                 conceder_acesso_curso($wp_user_id, $produto_id);
@@ -598,12 +623,19 @@ function conceder_acesso_curso($wp_user_id, $produto_id) {
     
     if ( isset($produtos[$produto_id]) ) {
         $plan_id = $produtos[$produto_id]['membership_id'];
-        if ( !wc_memberships_is_user_active_member($wp_user_id, $plan_id) ) {
+        if ( $plan_id > 0 && !wc_memberships_is_user_active_member($wp_user_id, $plan_id) ) {
             $args = array(
                 'plan_id' => $plan_id,
                 'user_id' => $wp_user_id
             );
             wc_memberships_create_user_membership( $args );
+        }
+        
+        $user_info = get_userdata($wp_user_id);
+        $nome = $user_info ? $user_info->first_name : '';
+        $email = $user_info ? $user_info->user_email : '';
+        if ($email) {
+             ead_enviar_email_boas_vindas($email, $nome, $wp_user_id, $produto_id, 'matricular');
         }
     }
 }
@@ -623,18 +655,42 @@ function processar_acesso_bumps($wp_user_id, $bumps_array) {
             criar_pedido_woo_silencioso($wp_user_id, 12895);
         } elseif ($bump_id === '12224_ext') {
             // Extensão de 6 meses
-            // TODO: Aqui precisa pegar a membership ativa 12224 e alterar o end_date para +6 meses
-            // Para fim de teste, não falha.
+            if (function_exists('wc_memberships_get_user_membership')) {
+                $membership = wc_memberships_get_user_membership($wp_user_id, 12224);
+                if ($membership) {
+                    $atual  = $membership->get_end_date('timestamp');
+                    $base   = ($atual && $atual > time()) ? $atual : time();
+                    $novo   = $base + (180 * DAY_IN_SECONDS);
+                    $membership->set_end_date(date('Y-m-d H:i:s', $novo));
+                    
+                    $user_info = get_userdata($wp_user_id);
+                    $nome = $user_info ? $user_info->first_name : '';
+                    $email = $user_info ? $user_info->user_email : '';
+                    if ($email) {
+                         ead_enviar_email_boas_vindas($email, $nome, $wp_user_id, 'extensao', 'estender');
+                    }
+                }
+            }
         }
     }
 }
 
 function criar_pedido_woo_silencioso($wp_user_id, $product_id) {
     if ( !function_exists('wc_create_order') ) return;
+    $product = wc_get_product($product_id);
+    if (!$product) return;
     $order = wc_create_order(array('customer_id' => $wp_user_id));
-    $order->add_product( wc_get_product($product_id), 1 );
+    $order->add_product( $product, 1 );
     $order->calculate_totals();
     $order->update_status('completed', 'Gerado via API Checkout Universal (Bump)');
+    
+    // Email Deusa
+    if ($product_id == 12895) {
+        $user_info = get_userdata($wp_user_id);
+        $nome = $user_info ? $user_info->first_name : '';
+        $email = $user_info ? $user_info->user_email : '';
+        if ($email) ead_enviar_email_boas_vindas($email, $nome, $wp_user_id, 'deusa', 'creditos');
+    }
 }
 
 function buscar_ou_criar_cliente_asaas($nome, $email, $cpf, $telefone, $base_url, $headers) {
@@ -664,4 +720,179 @@ function criar_usuario_silencioso($nome, $email) {
     wp_update_user( array('ID' => $user_id, 'first_name' => $nomes[0], 'last_name' => isset($nomes[1]) ? $nomes[count($nomes)-1] : '') );
     wp_new_user_notification( $user_id, null, 'both' );
     return $user_id;
+}
+
+// ============================================
+// E-MAILS POR PRODUTO E BUMPS
+// ============================================
+function ead_enviar_email_boas_vindas($email, $nome, $user_id, $produto, $acao) {
+    $cabecalhos = array('Content-Type: text/html; charset=UTF-8');
+
+    // Gerar link mágico se disponível
+    $url_acesso    = 'https://ead.reikitimeacademy.com.br/entrar/';
+    $texto_validade = '';
+    if (function_exists('cla_generate_magic_link')) {
+        $ml = cla_generate_magic_link($user_id);
+        $url_acesso     = $ml['url'];
+        $texto_validade = "<p style='font-size:11px;color:#999;margin-top:8px;'>Link de uso único · expira em 7 dias.</p>";
+    }
+
+    switch ($produto) {
+        // ── XÔ REIKI GENÉRICO ──
+        case 'xo_reiki':
+            $assunto = "Xô, Reiki Genérico! Seu acesso foi liberado 🌸";
+            $corpo   = ead_email_xo_reiki($nome, $url_acesso, $texto_validade);
+            break;
+
+        // ── INFINITY REIKI ──
+        case 'infinity':
+            $assunto = "Seu acesso ao Infinity Reiki foi liberado ✦";
+            $corpo   = ead_email_infinity($nome, $url_acesso, $texto_validade);
+            break;
+
+        // ── EXTENSÃO INFINITY ──
+        case 'extensao':
+            $assunto = "Seu acesso ao Infinity Reiki foi estendido por mais 6 meses ✦";
+            $corpo   = ead_email_extensao($nome, $url_acesso, $texto_validade);
+            break;
+
+        // ── DESAFIO INFINITY ──
+        case 'desafio':
+            $assunto = "O Desafio Infinity começa agora — acesse sua área ✦";
+            $corpo   = ead_email_desafio($nome, $url_acesso, $texto_validade);
+            break;
+
+        // ── DEUSA AI ──
+        case 'deusa':
+            $assunto = "Seus créditos Deusa AI PRO foram liberados ✦";
+            $corpo   = ead_email_deusa($nome, $url_acesso, $texto_validade);
+            break;
+
+        // ── GUARDIÃS (padrão existente) ──
+        default:
+            $assunto = "Bem-vinda! Seu acesso foi liberado ✨";
+            $corpo   = ead_email_guardias($nome, $url_acesso, $texto_validade);
+            break;
+    }
+
+    wp_mail($email, $assunto, $corpo, $cabecalhos);
+}
+
+// ── Templates de E-mail ──
+function ead_email_xo_reiki($nome, $url, $validade) {
+    return "
+    <html><body style='font-family:sans-serif;background:#1a0a1e;padding:20px;'>
+    <div style='max-width:600px;margin:0 auto;background:#200d28;border:1px solid rgba(220,130,200,0.3);border-radius:12px;overflow:hidden;'>
+      <div style='background:linear-gradient(135deg,#2D0A2E,#1A0A2E);padding:50px 30px;text-align:center;border-bottom:1px solid rgba(232,121,249,0.25);'>
+        <p style='color:#e879f9;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin:0 0 16px;'>Reiki Time Academy</p>
+        <h1 style='color:#f0abfc;font-family:Georgia,serif;font-style:italic;font-size:30px;margin:0 0 10px;font-weight:400;'>Xô, Reiki Genérico!</h1>
+        <p style='color:rgba(240,171,252,.55);font-size:14px;margin:0;'>Chegou sua hora, {$nome}</p>
+      </div>
+      <div style='padding:40px 35px;color:rgba(240,171,252,.8);line-height:1.8;font-size:15px;'>
+        <p>Que alegria ter você aqui! Seu acesso está liberado e a jornada para transformar sua prática de Reiki em um negócio próspero começa agora.</p>
+        <p style='color:rgba(240,171,252,.5);font-size:13px;'>Aprenda a posicionar seu trabalho, cobrar o que vale e atrair as clientes certas — tudo com autenticidade.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:linear-gradient(135deg,#a855f7,#e879f9);color:#fff;padding:16px 48px;text-decoration:none;border-radius:50px;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;'>Acessar Agora 🌸</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
+}
+
+function ead_email_infinity($nome, $url, $validade) {
+    return "
+    <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
+    <div style='max-width:600px;margin:0 auto;background:#111;border:1px solid #C9A84C;border-radius:12px;overflow:hidden;'>
+      <div style='background:linear-gradient(135deg,#0D0D0D,#1C1C1C);padding:50px 30px;text-align:center;border-bottom:1px solid #C9A84C;'>
+        <p style='color:#C9A84C;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin:0 0 16px;'>Reiki Time Academy</p>
+        <h1 style='color:#E5C97A;font-family:Georgia,serif;font-style:italic;font-size:30px;margin:0 0 10px;font-weight:400;'>Infinity Reiki</h1>
+        <p style='color:rgba(255,255,255,.5);font-size:14px;margin:0;'>Seu acesso foi liberado, {$nome}</p>
+      </div>
+      <div style='padding:40px 35px;color:rgba(255,255,255,.75);line-height:1.8;font-size:15px;'>
+        <p>Bem-vinda à sua jornada de Reiki à distância. Todas as aulas, materiais e a comunidade exclusiva já estão disponíveis para você na plataforma.</p>
+        <p style='color:rgba(255,255,255,.5);font-size:13px;'>Seu acesso é válido por <strong style='color:#E5C97A;'>6 meses</strong> a partir de hoje.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:linear-gradient(135deg,#C9A84C,#E5C97A);color:#0D0D0D;padding:16px 48px;text-decoration:none;border-radius:50px;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;'>Acessar o Infinity Reiki</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
+}
+
+function ead_email_extensao($nome, $url, $validade) {
+    return "
+    <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
+    <div style='max-width:600px;margin:0 auto;background:#111;border:1px solid #C9A84C;border-radius:12px;overflow:hidden;'>
+      <div style='background:linear-gradient(135deg,#0D0D0D,#1C1C1C);padding:50px 30px;text-align:center;border-bottom:1px solid #C9A84C;'>
+        <h1 style='color:#E5C97A;font-family:Georgia,serif;font-style:italic;font-size:30px;margin:0 0 10px;font-weight:400;'>+6 Meses de Acesso</h1>
+        <p style='color:rgba(255,255,255,.5);font-size:14px;margin:0;'>Sua jornada continua, {$nome}</p>
+      </div>
+      <div style='padding:40px 35px;color:rgba(255,255,255,.75);line-height:1.8;font-size:15px;'>
+        <p>Seu acesso ao Infinity Reiki foi estendido por mais <strong style='color:#E5C97A;'>6 meses</strong>. Continue sua prática sem interrupção — todas as aulas e materiais seguem disponíveis.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:linear-gradient(135deg,#C9A84C,#E5C97A);color:#0D0D0D;padding:16px 48px;text-decoration:none;border-radius:50px;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;'>Continuar Minha Jornada</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
+}
+
+function ead_email_desafio($nome, $url, $validade) {
+    return "
+    <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
+    <div style='max-width:600px;margin:0 auto;background:#111;border:1px solid #C9A84C;border-radius:12px;overflow:hidden;'>
+      <div style='background:linear-gradient(135deg,#0D0D0D,#1C1C1C);padding:50px 30px;text-align:center;border-bottom:1px solid #C9A84C;'>
+        <h1 style='color:#E5C97A;font-family:Georgia,serif;font-style:italic;font-size:30px;margin:0 0 10px;font-weight:400;'>Desafio Infinity</h1>
+        <p style='color:rgba(255,255,255,.5);font-size:14px;margin:0;'>O desafio começa agora, {$nome}</p>
+      </div>
+      <div style='padding:40px 35px;color:rgba(255,255,255,.75);line-height:1.8;font-size:15px;'>
+        <p>Seu acesso ao <strong style='color:#E5C97A;'>Desafio Infinity</strong> foi liberado.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:linear-gradient(135deg,#C9A84C,#E5C97A);color:#0D0D0D;padding:16px 48px;text-decoration:none;border-radius:50px;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;'>Começar o Desafio</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
+}
+
+function ead_email_deusa($nome, $url, $validade) {
+    return "
+    <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
+    <div style='max-width:600px;margin:0 auto;background:#111;border:1px solid #C9A84C;border-radius:12px;overflow:hidden;'>
+      <div style='background:linear-gradient(135deg,#080810,#12121E);padding:50px 30px;text-align:center;border-bottom:1px solid #C9A84C;'>
+        <h1 style='color:#E5C97A;font-family:Georgia,serif;font-style:italic;font-size:30px;margin:0 0 10px;font-weight:400;'>Deusa AI PRO</h1>
+        <p style='color:rgba(255,255,255,.5);font-size:14px;margin:0;'>Créditos liberados, {$nome}</p>
+      </div>
+      <div style='padding:40px 35px;color:rgba(255,255,255,.75);line-height:1.8;font-size:15px;'>
+        <p>Seus <strong style='color:#E5C97A;'>créditos PRO</strong> já estão na sua conta. Use para gerar Análises.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:linear-gradient(135deg,#C9A84C,#E5C97A);color:#0D0D0D;padding:16px 48px;text-decoration:none;border-radius:50px;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;'>Acessar a Deusa AI</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
+}
+
+function ead_email_guardias($nome, $url, $validade) {
+    $rosa = '#8b2942'; $ouro = '#c9a45a';
+    return "
+    <html><body style='font-family:sans-serif;background:#f4f1ef;padding:20px;color:#333;'>
+    <div style='max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;'>
+      <div style='background:$rosa;padding:40px 20px;text-align:center;border-radius:12px 12px 0 0;'>
+        <h1 style='color:#fff;font-family:serif;font-style:italic;margin:0;font-size:28px;'>Bem-vinda, {$nome}</h1>
+      </div>
+      <div style='padding:40px;line-height:1.7;'>
+        <p>Honramos sua chegada. Seu acesso ao portal já está disponível.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:$rosa;color:#fff;padding:18px 45px;text-decoration:none;border-radius:50px;font-weight:bold;border:1px solid $ouro;'>✨ ENTRAR NO PORTAL AGORA</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
 }

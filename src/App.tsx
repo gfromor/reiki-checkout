@@ -344,24 +344,42 @@ function CheckoutForm() {
         payload.cep = cep.replace(/\D/g, '');
         payload.numero = numero;
     } else if (paymentMethod === 'two_cards') {
-        payload.cc_name = ccName;
-        payload.cc_number = ccNumber;
-        payload.cc_expiry = ccExpiry;
-        payload.cc_cvv = ccCvv;
-        payload.split_card1_value = Number(card1EntryValue) || 0;
-        payload.cc_name2 = ccName2;
-        payload.cc_number2 = ccNumber2;
-        payload.cc_expiry2 = ccExpiry2;
-        payload.cc_cvv2 = ccCvv2;
-        payload.parcelas2 = installments2;
+        const value1 = Number(card1EntryValue) || 0;
+        const value2 = Math.max(0, total - value1);
+        
+        payload.cards = [
+          {
+            value: value1,
+            cc_name: ccName,
+            cc_number: ccNumber,
+            cc_expiry: ccExpiry,
+            cc_cvv: ccCvv,
+            parcelas: installments
+          },
+          {
+            value: value2,
+            cc_name: ccName2,
+            cc_number: ccNumber2,
+            cc_expiry: ccExpiry2,
+            cc_cvv: ccCvv2,
+            parcelas: installments2
+          }
+        ];
         payload.cep = cep.replace(/\D/g, '');
         payload.numero = numero;
     } else if (paymentMethod === 'pix_and_card') {
-        payload.cc_name = ccName;
-        payload.cc_number = ccNumber;
-        payload.cc_expiry = ccExpiry;
-        payload.cc_cvv = ccCvv;
-        payload.split_pix_value = Number(pixEntryValue) || 0;
+        const pixVal = Number(pixEntryValue) || 0;
+        const cardVal = Math.max(0, total - pixVal);
+
+        payload.pix_value = pixVal;
+        payload.card = {
+            value: cardVal,
+            cc_name: ccName,
+            cc_number: ccNumber,
+            cc_expiry: ccExpiry,
+            cc_cvv: ccCvv,
+            parcelas: installments
+        };
         payload.cep = cep.replace(/\D/g, '');
         payload.numero = numero;
     }
