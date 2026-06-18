@@ -542,6 +542,17 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
                 }
             }
         }
+    } elseif ( isset($payload['event']) && in_array($payload['event'], array('PAYMENT_OVERDUE', 'PAYMENT_DELETED')) ) {
+        // Pagamento Híbrido: Se o PIX expirar, cancela o hold do cartão
+        $payment = $payload['payment'];
+        if ( !empty($payment['externalReference']) && $payment['billingType'] === 'PIX' ) {
+            $parts = explode('|', $payment['externalReference']);
+            if ( count($parts) >= 5 ) {
+                $capture_card_id = sanitize_text_field($parts[4]);
+                reiki_asaas_cancelar($capture_card_id);
+                error_log('Webhook Híbrido: PIX expirado/deletado. Autorização do cartão ' . $capture_card_id . ' cancelada.');
+            }
+        }
     }
 
     return rest_ensure_response( array('recebido' => true) );
