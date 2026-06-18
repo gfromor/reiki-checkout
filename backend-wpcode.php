@@ -725,60 +725,63 @@ function criar_usuario_silencioso($nome, $email) {
 // ============================================
 // E-MAILS POR PRODUTO E BUMPS
 // ============================================
-function ead_enviar_email_boas_vindas($email, $nome, $user_id, $produto, $acao) {
-    $cabecalhos = array('Content-Type: text/html; charset=UTF-8');
+if (!function_exists('ead_enviar_email_boas_vindas')) {
+    function ead_enviar_email_boas_vindas($email, $nome, $user_id, $produto, $acao) {
+        $cabecalhos = array('Content-Type: text/html; charset=UTF-8');
 
-    // Gerar link mágico se disponível
-    $url_acesso    = 'https://ead.reikitimeacademy.com.br/entrar/';
-    $texto_validade = '';
-    if (function_exists('cla_generate_magic_link')) {
-        $ml = cla_generate_magic_link($user_id);
-        $url_acesso     = $ml['url'];
-        $texto_validade = "<p style='font-size:11px;color:#999;margin-top:8px;'>Link de uso único · expira em 7 dias.</p>";
+        // Gerar link mágico se disponível
+        $url_acesso    = 'https://ead.reikitimeacademy.com.br/entrar/';
+        $texto_validade = '';
+        if (function_exists('cla_generate_magic_link')) {
+            $ml = cla_generate_magic_link($user_id);
+            $url_acesso     = $ml['url'];
+            $texto_validade = "<p style='font-size:11px;color:#999;margin-top:8px;'>Link de uso único · expira em 7 dias.</p>";
+        }
+
+        switch ($produto) {
+            // ── XÔ REIKI GENÉRICO ──
+            case 'xo_reiki':
+                $assunto = "Xô, Reiki Genérico! Seu acesso foi liberado 🌸";
+                $corpo   = ead_email_xo_reiki($nome, $url_acesso, $texto_validade);
+                break;
+
+            // ── INFINITY REIKI ──
+            case 'infinity':
+                $assunto = "Seu acesso ao Infinity Reiki foi liberado ✦";
+                $corpo   = ead_email_infinity($nome, $url_acesso, $texto_validade);
+                break;
+
+            // ── EXTENSÃO INFINITY ──
+            case 'extensao':
+                $assunto = "Seu acesso ao Infinity Reiki foi estendido por mais 6 meses ✦";
+                $corpo   = ead_email_extensao($nome, $url_acesso, $texto_validade);
+                break;
+
+            // ── DESAFIO INFINITY ──
+            case 'desafio':
+                $assunto = "O Desafio Infinity começa agora — acesse sua área ✦";
+                $corpo   = ead_email_desafio($nome, $url_acesso, $texto_validade);
+                break;
+
+            // ── DEUSA AI ──
+            case 'deusa':
+                $assunto = "Seus créditos Deusa AI PRO foram liberados ✦";
+                $corpo   = ead_email_deusa($nome, $url_acesso, $texto_validade);
+                break;
+
+            // ── GUARDIÃS (padrão existente) ──
+            default:
+                $assunto = "Bem-vinda! Seu acesso foi liberado ✨";
+                $corpo   = ead_email_guardias($nome, $url_acesso, $texto_validade);
+                break;
+        }
+
+        wp_mail($email, $assunto, $corpo, $cabecalhos);
     }
-
-    switch ($produto) {
-        // ── XÔ REIKI GENÉRICO ──
-        case 'xo_reiki':
-            $assunto = "Xô, Reiki Genérico! Seu acesso foi liberado 🌸";
-            $corpo   = ead_email_xo_reiki($nome, $url_acesso, $texto_validade);
-            break;
-
-        // ── INFINITY REIKI ──
-        case 'infinity':
-            $assunto = "Seu acesso ao Infinity Reiki foi liberado ✦";
-            $corpo   = ead_email_infinity($nome, $url_acesso, $texto_validade);
-            break;
-
-        // ── EXTENSÃO INFINITY ──
-        case 'extensao':
-            $assunto = "Seu acesso ao Infinity Reiki foi estendido por mais 6 meses ✦";
-            $corpo   = ead_email_extensao($nome, $url_acesso, $texto_validade);
-            break;
-
-        // ── DESAFIO INFINITY ──
-        case 'desafio':
-            $assunto = "O Desafio Infinity começa agora — acesse sua área ✦";
-            $corpo   = ead_email_desafio($nome, $url_acesso, $texto_validade);
-            break;
-
-        // ── DEUSA AI ──
-        case 'deusa':
-            $assunto = "Seus créditos Deusa AI PRO foram liberados ✦";
-            $corpo   = ead_email_deusa($nome, $url_acesso, $texto_validade);
-            break;
-
-        // ── GUARDIÃS (padrão existente) ──
-        default:
-            $assunto = "Bem-vinda! Seu acesso foi liberado ✨";
-            $corpo   = ead_email_guardias($nome, $url_acesso, $texto_validade);
-            break;
-    }
-
-    wp_mail($email, $assunto, $corpo, $cabecalhos);
 }
 
 // ── Templates de E-mail ──
+if (!function_exists('ead_email_xo_reiki')) {
 function ead_email_xo_reiki($nome, $url, $validade) {
     return "
     <html><body style='font-family:sans-serif;background:#1a0a1e;padding:20px;'>
@@ -799,7 +802,9 @@ function ead_email_xo_reiki($nome, $url, $validade) {
     </div>
     </body></html>";
 }
+}
 
+if (!function_exists('ead_email_infinity')) {
 function ead_email_infinity($nome, $url, $validade) {
     return "
     <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
@@ -820,7 +825,9 @@ function ead_email_infinity($nome, $url, $validade) {
     </div>
     </body></html>";
 }
+}
 
+if (!function_exists('ead_email_extensao')) {
 function ead_email_extensao($nome, $url, $validade) {
     return "
     <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
@@ -839,7 +846,9 @@ function ead_email_extensao($nome, $url, $validade) {
     </div>
     </body></html>";
 }
+}
 
+if (!function_exists('ead_email_desafio')) {
 function ead_email_desafio($nome, $url, $validade) {
     return "
     <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
@@ -858,7 +867,9 @@ function ead_email_desafio($nome, $url, $validade) {
     </div>
     </body></html>";
 }
+}
 
+if (!function_exists('ead_email_deusa')) {
 function ead_email_deusa($nome, $url, $validade) {
     return "
     <html><body style='font-family:sans-serif;background:#0D0D0D;padding:20px;'>
@@ -877,7 +888,9 @@ function ead_email_deusa($nome, $url, $validade) {
     </div>
     </body></html>";
 }
+}
 
+if (!function_exists('ead_email_guardias')) {
 function ead_email_guardias($nome, $url, $validade) {
     $rosa = '#8b2942'; $ouro = '#c9a45a';
     return "
@@ -895,4 +908,5 @@ function ead_email_guardias($nome, $url, $validade) {
       </div>
     </div>
     </body></html>";
+}
 }
