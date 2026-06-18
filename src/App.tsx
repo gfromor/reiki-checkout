@@ -540,63 +540,6 @@ function CheckoutForm() {
             )}
           </section>
 
-          {productId === 'infinity' && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {ORDER_BUMPS.map(bump => {
-                const isSelected = selectedBumps.includes(bump.id);
-                return (
-                  <div 
-                    key={bump.id} 
-                    className={`border-2 rounded-2xl overflow-hidden transition-all duration-300 ${isSelected ? 'border-[#C9A84C]' : 'border-transparent'}`}
-                    style={{ backgroundColor: '#1A1A1A' }}
-                  >
-                    {/* Header do Bump (Amarelo) */}
-                    <div className="bg-[#C9A84C] text-[#1A1A1A] text-center py-2 text-xs font-bold tracking-widest uppercase flex items-center justify-center gap-2">
-                      <span className="text-amber-900">⚡</span>
-                      Oferta Exclusiva — Apenas uma vez
-                      <span className="text-amber-900">⚡</span>
-                    </div>
-                    
-                    {/* Corpo do Bump */}
-                    <div className="p-5 md:p-6">
-                      <label className="flex items-start gap-4 cursor-pointer group">
-                        <div className="relative flex items-center justify-center pt-1">
-                          <input 
-                            type="checkbox" 
-                            checked={isSelected}
-                            onChange={() => toggleBump(bump.id)}
-                            className="sr-only"
-                          />
-                          <div className={`w-6 h-6 border-2 rounded transition-all duration-300 flex items-center justify-center ${isSelected ? 'bg-[#C9A84C] border-[#C9A84C]' : 'border-stone-500 bg-transparent group-hover:border-[#C9A84C]'}`}>
-                            {isSelected && <CheckCircle2 className="w-4 h-4 text-[#1A1A1A]" />}
-                          </div>
-                        </div>
-                        
-                        <div className="flex-1">
-                          <h4 className={`text-base md:text-lg font-bold transition-colors ${isSelected ? 'text-[#C9A84C]' : 'text-[#FDF8F0]'}`}>
-                            {bump.title}
-                          </h4>
-                        </div>
-                      </label>
-
-                      <div className="mt-5 pl-10 border-t border-white/10 pt-5">
-                        <p className="text-stone-300 text-sm leading-relaxed mb-4">
-                          {bump.desc}
-                        </p>
-                        
-                        <div className="bg-black/30 rounded-lg p-4 border border-white/5 inline-block">
-                          <p className="text-[#C9A84C] font-semibold text-sm">
-                            {bump.originalPriceText} {bump.priceTextBRL} <span className="text-stone-400 text-xs font-normal ml-1">(adicionado ao seu pedido agora)</span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
         </div>
 
         <div className="lg:col-span-5">
@@ -632,6 +575,66 @@ function CheckoutForm() {
                 </div>
               )}
             </div>
+
+            {productId === 'infinity' && (
+              <div className="space-y-4 mb-6">
+                <div className="text-sm font-bold text-stone-800 border-b pb-2">Complete seu pedido:</div>
+                {ORDER_BUMPS.map(bump => {
+                  const isSelected = selectedBumps.includes(bump.id);
+                  return (
+                    <div 
+                      key={bump.id} 
+                      className={`border-2 rounded-xl overflow-hidden transition-all duration-300 bg-stone-50 ${isSelected ? 'border-red-500 bg-red-50/30' : 'border-stone-200'}`}
+                    >
+                      {/* Header do Bump */}
+                      <div className={`text-center py-1.5 text-[11px] font-bold tracking-wider uppercase flex items-center justify-center gap-1.5 border-b ${isSelected ? 'bg-red-500 text-white border-red-600' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                        <span className={isSelected ? "text-white" : "text-red-500"}>🔥</span>
+                        Oferta Exclusiva — Apenas uma vez
+                        <span className={isSelected ? "text-white" : "text-red-500"}>🔥</span>
+                      </div>
+                      
+                      {/* Corpo do Bump */}
+                      <div className="p-4">
+                        <label className="flex items-start gap-3 cursor-pointer group">
+                          <div className="relative flex items-center justify-center pt-0.5">
+                            <input 
+                              type="checkbox" 
+                              checked={isSelected}
+                              onChange={() => toggleBump(bump.id)}
+                              className="sr-only"
+                            />
+                            <div className={`w-5 h-5 border-2 rounded transition-all duration-300 flex items-center justify-center ${isSelected ? 'bg-red-500 border-red-500' : 'border-stone-400 bg-white group-hover:border-red-400'}`}>
+                              {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                            </div>
+                          </div>
+                          
+                          <div className="flex-1">
+                            <h4 className={`text-sm font-bold leading-tight transition-colors ${isSelected ? 'text-stone-900' : 'text-stone-800'}`}>
+                              {bump.title}
+                            </h4>
+                          </div>
+                        </label>
+
+                        {isSelected && (
+                          <div className="mt-3 pl-8 animate-in slide-in-from-top-2 fade-in duration-300">
+                            <p className="text-stone-600 text-[13px] leading-snug mb-3">
+                              {bump.desc}
+                            </p>
+                          </div>
+                        )}
+                        <div className="mt-2 pl-8">
+                            <div className="bg-green-50 rounded px-2 py-1.5 border border-green-100 inline-block">
+                              <p className="text-green-700 font-bold text-xs">
+                                {bump.originalPriceText} {bump.priceTextBRL}
+                              </p>
+                            </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="border-t pt-4 mb-8">
               <div className="flex justify-between items-end">
