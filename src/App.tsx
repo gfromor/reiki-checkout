@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CreditCard, QrCode, Receipt, ShieldCheck, Lock, Globe, Loader2, CheckCircle2 } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -197,6 +197,35 @@ function CheckoutForm() {
         });
     }
   }, []);
+
+  // ── LEAD CAPTURE AUTOMÁTICO ──
+  // Dispara o POST /lead em background quando o usuário preenche nome + email.
+  // Usa useRef para garantir que só dispara UMA VEZ por sessão (não a cada keystroke).
+  const leadSentRef = useRef(false);
+
+  useEffect(() => {
+    // Só dispara se: nome tem sobrenome, email tem @, e ainda não enviou nesta sessão
+    if (leadSentRef.current) return;
+    if (!nome.includes(' ') || !email.includes('@')) return;
+
+    // Debounce de 2 segundos — espera o usuário parar de digitar
+    const timer = setTimeout(() => {
+      leadSentRef.current = true; // Marca como enviado para não repetir
+
+      const formData = new URLSearchParams();
+      formData.append("nome", nome);
+      formData.append("email", email);
+      if (telefone) formData.append("telefone", telefone);
+
+      // Fire-and-forget — não bloqueia nada, falha silenciosa
+      fetch("https://reikitimeacademy.com.br/wp-json/cuidar/v1/lead", {
+        method: "POST",
+        body: formData
+      }).catch(() => {});
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [nome, email, telefone]);
   
   const getProductPrice = () => {
     if (currency === 'USD') return product.usdPrice;
