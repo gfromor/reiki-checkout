@@ -35,8 +35,41 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     subtitle: 'Download imediato (PDF)',
     brlPrice: 47.00, brlOriginal: 97.00,
     usdPrice: 12.00, eurPrice: 11.00 
-  },
+  }
 };
+
+const ORDER_BUMPS = [
+  {
+    id: '12224_ext', // ID temporário que usaremos no backend para identificar
+    title: 'Sim! Quero mais 6 meses de acesso',
+    priceTextBRL: 'por apenas R$ 19,90',
+    brlPrice: 19.90,
+    usdPrice: 5.00,
+    eurPrice: 5.00,
+    desc: 'Garanta 1 ano completo de acesso à plataforma, aulas e comunidade, sem interrupção.',
+    originalPriceText: 'De R$ 67,00 — '
+  },
+  {
+    id: '13031', // Desafio Infinity
+    title: 'Sim! Quero o Desafio Infinity e vender Reiki em 3 semanas',
+    priceTextBRL: 'por apenas R$ 47,00',
+    brlPrice: 47.00,
+    usdPrice: 10.00,
+    eurPrice: 10.00,
+    desc: 'O passo a passo da metodologia Infinity aplicada a vendas com acompanhamento.',
+    originalPriceText: 'De R$ 497,00 — '
+  },
+  {
+    id: '12895', // Deusa AI PRO
+    title: 'Sim! Quero adicionar 10 créditos Deusa AI PRO',
+    priceTextBRL: 'por apenas R$ 29,90',
+    brlPrice: 29.90,
+    usdPrice: 6.00,
+    eurPrice: 6.00,
+    desc: 'Gere um mapeamento energético profundo (Chakras ou Mapa EEF) em minutos.',
+    originalPriceText: 'Adicionar Deusa AI PRO — 10 Créditos '
+  }
+];
 
 type PaymentMethod = 'credit_card' | 'pix' | 'boleto';
 type Currency = 'BRL' | 'USD' | 'EUR';
@@ -101,6 +134,14 @@ function CheckoutForm() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   
+  const [selectedBumps, setSelectedBumps] = useState<string[]>([]);
+
+  const toggleBump = (bumpId: string) => {
+    setSelectedBumps(prev => 
+      prev.includes(bumpId) ? prev.filter(id => id !== bumpId) : [...prev, bumpId]
+    );
+  };
+  
   useEffect(() => {
     const cleanCep = cep.replace(/\D/g, '');
     if (cleanCep.length === 8) {
@@ -135,12 +176,27 @@ function CheckoutForm() {
   
   const productPrice = getProductPrice();
   
+  const basePrice = (() => {
+    let price = productPrice;
+    if (productId === 'infinity') {
+      selectedBumps.forEach(bumpId => {
+        const bump = ORDER_BUMPS.find(b => b.id === bumpId);
+        if (bump) {
+          if (currency === 'USD') price += bump.usdPrice;
+          else if (currency === 'EUR') price += bump.eurPrice;
+          else price += bump.brlPrice;
+        }
+      });
+    }
+    return price;
+  })();
+
   const calculateTotal = () => {
     if (currency === 'BRL' && paymentMethod === 'credit_card') {
       const rate = INTEREST_RATES[installments] || 0;
-      return productPrice * (1 + rate / 100);
+      return basePrice * (1 + rate / 100);
     }
-    return productPrice;
+    return basePrice;
   };
 
   const total = calculateTotal();
@@ -183,7 +239,8 @@ function CheckoutForm() {
       gateway: currency === 'BRL' ? 'asaas' : 'stripe',
       currency: currency,
       parcelas: installments,
-      metodo: paymentMethod
+      metodo: paymentMethod,
+      bumps: selectedBumps
     };
 
     // 2. Se for Stripe, geramos o Token primeiro
@@ -439,7 +496,7 @@ function CheckoutForm() {
                   <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
                     {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
                       const rate = INTEREST_RATES[num] || 0;
-                      const instTotal = productPrice * (1 + rate / 100);
+                      const instTotal = basePrice * (1 + rate / 100);
                       const instValue = instTotal / num;
                       return (
                         <option key={num} value={num}>
@@ -482,6 +539,64 @@ function CheckoutForm() {
               </div>
             )}
           </section>
+
+          {productId === 'infinity' && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {ORDER_BUMPS.map(bump => {
+                const isSelected = selectedBumps.includes(bump.id);
+                return (
+                  <div 
+                    key={bump.id} 
+                    className={`border-2 rounded-2xl overflow-hidden transition-all duration-300 ${isSelected ? 'border-[#C9A84C]' : 'border-transparent'}`}
+                    style={{ backgroundColor: '#1A1A1A' }}
+                  >
+                    {/* Header do Bump (Amarelo) */}
+                    <div className="bg-[#C9A84C] text-[#1A1A1A] text-center py-2 text-xs font-bold tracking-widest uppercase flex items-center justify-center gap-2">
+                      <span className="text-amber-900">⚡</span>
+                      Oferta Exclusiva — Apenas uma vez
+                      <span className="text-amber-900">⚡</span>
+                    </div>
+                    
+                    {/* Corpo do Bump */}
+                    <div className="p-5 md:p-6">
+                      <label className="flex items-start gap-4 cursor-pointer group">
+                        <div className="relative flex items-center justify-center pt-1">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected}
+                            onChange={() => toggleBump(bump.id)}
+                            className="sr-only"
+                          />
+                          <div className={`w-6 h-6 border-2 rounded transition-all duration-300 flex items-center justify-center ${isSelected ? 'bg-[#C9A84C] border-[#C9A84C]' : 'border-stone-500 bg-transparent group-hover:border-[#C9A84C]'}`}>
+                            {isSelected && <CheckCircle2 className="w-4 h-4 text-[#1A1A1A]" />}
+                          </div>
+                        </div>
+                        
+                        <div className="flex-1">
+                          <h4 className={`text-base md:text-lg font-bold transition-colors ${isSelected ? 'text-[#C9A84C]' : 'text-[#FDF8F0]'}`}>
+                            {bump.title}
+                          </h4>
+                        </div>
+                      </label>
+
+                      <div className="mt-5 pl-10 border-t border-white/10 pt-5">
+                        <p className="text-stone-300 text-sm leading-relaxed mb-4">
+                          {bump.desc}
+                        </p>
+                        
+                        <div className="bg-black/30 rounded-lg p-4 border border-white/5 inline-block">
+                          <p className="text-[#C9A84C] font-semibold text-sm">
+                            {bump.originalPriceText} {bump.priceTextBRL} <span className="text-stone-400 text-xs font-normal ml-1">(adicionado ao seu pedido agora)</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
         </div>
 
         <div className="lg:col-span-5">

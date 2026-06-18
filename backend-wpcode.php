@@ -24,12 +24,19 @@ function get_reiki_products() {
             'preco_usd' => 129.00,
             'preco_eur' => 119.00
         ),
-        'ebook' => array(
-            'nome' => 'E-book Reiki Essencial',
-            'membership_id' => 5678,
-            'preco_brl' => 47.00,
-            'preco_usd' => 9.00,
-            'preco_eur' => 8.00
+        'cer' => array(
+            'nome' => 'Formação CER',
+            'membership_id' => 12219,
+            'preco_brl' => 1997.00,
+            'preco_usd' => 397.00,
+            'preco_eur' => 347.00
+        ),
+        'infinity' => array(
+            'nome' => 'Infinity Reiki',
+            'membership_id' => 12224,
+            'preco_brl' => 67.00,
+            'preco_usd' => 17.00,
+            'preco_eur' => 17.00
         )
     );
 }
@@ -84,7 +91,19 @@ function processar_checkout_universal( WP_REST_Request $request ) {
     // SEGURANÇA: Preço vem do catálogo do servidor, nunca do frontend
     $currency = strtolower(sanitize_text_field( $params['currency'] ?? 'brl' ));
     $produto_info = isset($produtos[$produto_id]) ? $produtos[$produto_id] : null;
+    $bumps_selecionados = isset($params['bumps']) && is_array($params['bumps']) ? array_map('sanitize_text_field', $params['bumps']) : array();
+    
+    // Configuração dos Bumps
+    $bumps_config = array(
+        '12224_ext' => array('nome' => '+6 Meses', 'brl' => 19.90, 'usd' => 5.00, 'eur' => 5.00),
+        '13031'     => array('nome' => 'Desafio Infinity', 'brl' => 47.00, 'usd' => 10.00, 'eur' => 10.00),
+        '12895'     => array('nome' => 'Deusa AI PRO', 'brl' => 29.90, 'usd' => 6.00, 'eur' => 6.00)
+    );
+
+    $nomes_comprados = array();
+
     if ($produto_info) {
+        $nomes_comprados[] = $produto_info['nome'];
         if ($currency === 'usd') {
             $valor_total = $produto_info['preco_usd'];
         } elseif ($currency === 'eur') {
@@ -95,6 +114,21 @@ function processar_checkout_universal( WP_REST_Request $request ) {
     } else {
         $valor_total = 0;
     }
+
+    foreach ($bumps_selecionados as $bump_id) {
+        if (isset($bumps_config[$bump_id])) {
+            $nomes_comprados[] = $bumps_config[$bump_id]['nome'];
+            if ($currency === 'usd') {
+                $valor_total += $bumps_config[$bump_id]['usd'];
+            } elseif ($currency === 'eur') {
+                $valor_total += $bumps_config[$bump_id]['eur'];
+            } else {
+                $valor_total += $bumps_config[$bump_id]['brl'];
+            }
+        }
+    }
+
+    $descricao_compra = 'Compra: ' . implode(', ', $nomes_comprados);
 
     if ( empty($nome) || empty($email) || empty($produto_id) ) {
         return new WP_Error( 'erro_dados', 'Preencha todos os dados obrigatórios', array( 'status' => 400 ) );
@@ -138,8 +172,8 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             'billingType' => $billing_type,
             'value' => $valor_total,
             'dueDate' => date('Y-m-d', strtotime('+2 days')),
-            'description' => 'Compra: ' . $produtos[$produto_id]['nome'],
-            'externalReference' => $wp_user_id . '|' . $produto_id
+            'description' => $descricao_compra,
+            'externalReference' => $wp_user_id . '|' . $produto_id . '|' . implode(',', $bumps_selecionados)
         );
 
         if ($billing_type == 'CREDIT_CARD') {
@@ -189,6 +223,9 @@ function processar_checkout_universal( WP_REST_Request $request ) {
 
         if ( in_array($body_resp['status'], array('CONFIRMED', 'RECEIVED')) ) {
             conceder_acesso_curso($wp_user_id, $produto_id);
+            if (!empty($bumps_selecionados)) {
+                processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+            }
         }
 
     // ================== FLUXO STRIPE (INTERNACIONAL) ==================
@@ -210,10 +247,11 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             'confirm' => 'true',
             'automatic_payment_methods[enabled]' => 'true',
             'automatic_payment_methods[allow_redirects]' => 'never',
-            'description' => 'Compra: ' . $produtos[$produto_id]['nome'],
+            'description' => $descricao_compra,
             'receipt_email' => $email,
             'metadata[wp_user_id]' => $wp_user_id,
-            'metadata[produto_id]' => $produto_id
+            'metadata[produto_id]' => $produto_id,
+            'metadata[bumps]' => implode(',', $bumps_selecionados)
         ));
 
         $response = wp_remote_post( 'https://api.stripe.com/v1/payment_intents', array(
@@ -234,6 +272,9 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             $retorno['sucesso'] = true;
             $retorno['metodo'] = 'STRIPE';
             conceder_acesso_curso($wp_user_id, $produto_id);
+            if (!empty($bumps_selecionados)) {
+                processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+            }
         } else if ( $body_resp['status'] === 'requires_action' ) {
             $retorno['sucesso'] = false;
             $retorno['requires_action'] = true;
@@ -266,10 +307,15 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
         $payment = $payload['payment'];
         if ( !empty($payment['externalReference']) ) {
             $parts = explode('|', $payment['externalReference']);
-            if ( count($parts) == 2 ) {
+            if ( count($parts) >= 2 ) {
                 $wp_user_id = intval($parts[0]);
                 $produto_id = sanitize_text_field($parts[1]);
                 conceder_acesso_curso($wp_user_id, $produto_id);
+                
+                if (isset($parts[2]) && !empty($parts[2])) {
+                    $bumps_selecionados = explode(',', $parts[2]);
+                    processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+                }
             }
         }
     }
@@ -322,6 +368,11 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
             $wp_user_id = intval($payment_intent['metadata']['wp_user_id']);
             $produto_id = sanitize_text_field($payment_intent['metadata']['produto_id']);
             conceder_acesso_curso($wp_user_id, $produto_id);
+            
+            if (!empty($payment_intent['metadata']['bumps'])) {
+                $bumps_selecionados = explode(',', $payment_intent['metadata']['bumps']);
+                processar_acesso_bumps($wp_user_id, $bumps_selecionados);
+            }
         }
     }
 
@@ -349,6 +400,35 @@ function conceder_acesso_curso($wp_user_id, $produto_id) {
             wc_memberships_create_user_membership( $args );
         }
     }
+}
+
+function processar_acesso_bumps($wp_user_id, $bumps_array) {
+    if ( !function_exists('wc_memberships_create_user_membership') ) return;
+    
+    foreach ($bumps_array as $bump_id) {
+        if ($bump_id === '13031') {
+            // Desafio Infinity (Membership)
+            if ( !wc_memberships_is_user_active_member($wp_user_id, 13031) ) {
+                wc_memberships_create_user_membership( array('plan_id' => 13031, 'user_id' => $wp_user_id) );
+            }
+        } elseif ($bump_id === '12895') {
+            // Deusa AI PRO é um Produto simples! Como nosso fluxo não gera um Pedido WooCommerce nativo,
+            // Precisamos criar um pedido automático para que os gatilhos do WooCommerce entreguem o crédito.
+            criar_pedido_woo_silencioso($wp_user_id, 12895);
+        } elseif ($bump_id === '12224_ext') {
+            // Extensão de 6 meses
+            // TODO: Aqui precisa pegar a membership ativa 12224 e alterar o end_date para +6 meses
+            // Para fim de teste, não falha.
+        }
+    }
+}
+
+function criar_pedido_woo_silencioso($wp_user_id, $product_id) {
+    if ( !function_exists('wc_create_order') ) return;
+    $order = wc_create_order(array('customer_id' => $wp_user_id));
+    $order->add_product( wc_get_product($product_id), 1 );
+    $order->calculate_totals();
+    $order->update_status('completed', 'Gerado via API Checkout Universal (Bump)');
 }
 
 function buscar_ou_criar_cliente_asaas($nome, $email, $cpf, $telefone, $base_url, $headers) {
