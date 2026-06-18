@@ -42,32 +42,26 @@ const ORDER_BUMPS = [
   {
     id: '12224_ext', // ID temporário que usaremos no backend para identificar
     title: 'Sim! Quero mais 6 meses de acesso',
-    priceTextBRL: 'por apenas R$ 19,90',
-    brlPrice: 19.90,
-    usdPrice: 5.00,
-    eurPrice: 5.00,
-    desc: 'Garanta 1 ano completo de acesso à plataforma, aulas e comunidade, sem interrupção.',
-    originalPriceText: 'De R$ 67,00 — '
+    brlPrice: 19.90, brlOriginal: 67.00,
+    usdPrice: 5.00, usdOriginal: 17.00,
+    eurPrice: 5.00, eurOriginal: 17.00,
+    desc: 'Garanta 1 ano completo de acesso à plataforma, aulas e comunidade, sem interrupção.'
   },
   {
     id: '13031', // Desafio Infinity
     title: 'Sim! Quero o Desafio Infinity e vender Reiki em 3 semanas',
-    priceTextBRL: 'por apenas R$ 47,00',
-    brlPrice: 47.00,
-    usdPrice: 10.00,
-    eurPrice: 10.00,
-    desc: 'O passo a passo da metodologia Infinity aplicada a vendas com acompanhamento.',
-    originalPriceText: 'De R$ 497,00 — '
+    brlPrice: 47.00, brlOriginal: 497.00,
+    usdPrice: 10.00, usdOriginal: 97.00,
+    eurPrice: 10.00, eurOriginal: 87.00,
+    desc: 'O passo a passo da metodologia Infinity aplicada a vendas com acompanhamento.'
   },
   {
     id: '12895', // Deusa AI PRO
     title: 'Sim! Quero adicionar 10 créditos Deusa AI PRO',
-    priceTextBRL: 'por apenas R$ 29,90',
-    brlPrice: 29.90,
-    usdPrice: 6.00,
-    eurPrice: 6.00,
-    desc: 'Gere um mapeamento energético profundo (Chakras ou Mapa EEF) em minutos.',
-    originalPriceText: 'Adicionar Deusa AI PRO — 10 Créditos '
+    brlPrice: 29.90, brlOriginal: 0,
+    usdPrice: 6.00, usdOriginal: 0,
+    eurPrice: 6.00, eurOriginal: 0,
+    desc: 'Gere um mapeamento energético profundo (Chakras ou Mapa EEF) em minutos.'
   }
 ];
 
@@ -625,7 +619,16 @@ function CheckoutForm() {
                         <div className="mt-2 pl-8">
                             <div className="bg-green-50 rounded px-2 py-1.5 border border-green-100 inline-block">
                               <p className="text-green-700 font-bold text-xs">
-                                {bump.originalPriceText} {bump.priceTextBRL}
+                                {bump.brlOriginal > 0 && bump.id !== '12895' && (
+                                  <>De {currency === 'BRL' && bump.brlOriginal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  {currency === 'USD' && bump.usdOriginal.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                  {currency === 'EUR' && bump.eurOriginal.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })} — </>
+                                )}
+                                {bump.id === '12895' && "Adicionar Deusa AI PRO — 10 Créditos por apenas "}
+                                {bump.brlOriginal > 0 && bump.id !== '12895' && "por apenas "}
+                                {currency === 'BRL' && bump.brlPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                {currency === 'USD' && bump.usdPrice.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                {currency === 'EUR' && bump.eurPrice.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
                               </p>
                             </div>
                         </div>
