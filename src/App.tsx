@@ -18,6 +18,18 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     brlPrice: 647.00, brlOriginal: 997.00,
     usdPrice: 129.00, eurPrice: 119.00 
   },
+  'cer': {
+    title: 'Certificação Expert Reiki Completa',
+    subtitle: 'Curso Expert Reiki V2 + Bônus Físicos e Digitais',
+    brlPrice: 1997.00, brlOriginal: 5188.00,
+    usdPrice: 397.00, eurPrice: 347.00
+  },
+  'infinity': {
+    title: 'Método Infinity Reiki',
+    subtitle: 'Acesso completo por 6 meses',
+    brlPrice: 67.00, brlOriginal: 697.00,
+    usdPrice: 17.00, eurPrice: 17.00
+  },
   'ebook': { 
     title: 'E-book Reiki Essencial', 
     subtitle: 'Download imediato (PDF)',
