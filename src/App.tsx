@@ -8,7 +8,7 @@ const stripePromise = loadStripe('pk_live_51M4X8UJCAiZy2d8TofsRm9xrvVjItsdR1XycJ
 
 const INTEREST_RATES: Record<number, number> = {
   1: 0, 2: 7, 3: 8, 4: 9, 5: 10, 6: 11,
-  7: 12, 8: 13, 9: 14, 10: 16, 11: 18, 12: 20
+  7: 13, 8: 14, 9: 15, 10: 16, 11: 18, 12: 20
 };
 
 const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number, image: string }> = {
@@ -36,8 +36,8 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
   'ebook': { 
     title: 'E-book Reiki Essencial', 
     subtitle: 'Download imediato (PDF)',
-    brlPrice: 47.00, brlOriginal: 97.00,
-    usdPrice: 12.00, eurPrice: 11.00,
+    brlPrice: 29.90, brlOriginal: 97.00,
+    usdPrice: 6.00, eurPrice: 6.00,
     image: '/curso-cuidar.png'
   }
 };
@@ -522,7 +522,7 @@ function CheckoutForm() {
                 </div>
               )}
 
-              {currency === 'BRL' && paymentMethod === 'credit_card' && (
+              {currency === 'BRL' && ['credit_card', 'two_cards', 'pix_and_card'].includes(paymentMethod) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="block text-sm font-medium text-stone-700 mb-1">CEP *</label>

@@ -359,9 +359,9 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             $cap2 = reiki_asaas_capturar($resp2['id']);
             
             if (is_wp_error($cap1) || is_wp_error($cap2)) {
-                 // Num cenário real, se um falhar, tentaria reverter o outro. 
-                 // Vamos deixar um error_log caso um dos cartões autorizados falhe na captura imediata.
-                 error_log("ALERTA CRITICO: Falha ao capturar um dos dois cartões pré-autorizados. {$resp1['id']} / {$resp2['id']}");
+                 reiki_asaas_cancelar($resp1['id']);
+                 reiki_asaas_cancelar($resp2['id']);
+                 return new WP_Error('erro_captura', 'Falha na captura de um dos cartões. Tente novamente.', array('status' => 500));
             }
             
             $retorno['status_venda'] = 'CONFIRMED';
@@ -779,6 +779,12 @@ if (!function_exists('ead_enviar_email_boas_vindas')) {
                 $assunto = "Seus créditos Deusa AI PRO foram liberados ✦";
                 $corpo   = ead_email_deusa($nome, $url_acesso, $texto_validade);
                 break;
+                
+            // ── EBOOK ──
+            case 'ebook':
+                $assunto = "Seu E-book Reiki Essencial chegou 📖";
+                $corpo   = ead_email_ebook($nome, $url_acesso, $texto_validade);
+                break;
 
             // ── GUARDIÃS (padrão existente) ──
             default:
@@ -914,6 +920,27 @@ function ead_email_guardias($nome, $url, $validade) {
         <p>Honramos sua chegada. Seu acesso ao portal já está disponível.</p>
         <div style='text-align:center;margin:40px 0;'>
           <a href='{$url}' style='display:inline-block;background:$rosa;color:#fff;padding:18px 45px;text-decoration:none;border-radius:50px;font-weight:bold;border:1px solid $ouro;'>✨ ENTRAR NO PORTAL AGORA</a>
+          {$validade}
+        </div>
+      </div>
+    </div>
+    </body></html>";
+}
+}
+
+if (!function_exists('ead_email_ebook')) {
+function ead_email_ebook($nome, $url, $validade) {
+    return "
+    <html><body style='font-family:sans-serif;background:#f4f1ef;padding:20px;color:#333;'>
+    <div style='max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;'>
+      <div style='background:#111;padding:40px 20px;text-align:center;border-radius:12px 12px 0 0;'>
+        <h1 style='color:#E5C97A;font-family:serif;font-style:italic;margin:0;font-size:28px;'>E-book Reiki Essencial</h1>
+      </div>
+      <div style='padding:40px;line-height:1.7;'>
+        <p>Olá {$nome}, seu E-book Reiki Essencial está pronto para leitura.</p>
+        <p>Acesse o portal e baixe seu material no primeiro módulo.</p>
+        <div style='text-align:center;margin:40px 0;'>
+          <a href='{$url}' style='display:inline-block;background:#111;color:#E5C97A;padding:18px 45px;text-decoration:none;border-radius:50px;font-weight:bold;'>Acessar Meu Material</a>
           {$validade}
         </div>
       </div>
