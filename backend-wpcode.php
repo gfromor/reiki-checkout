@@ -399,6 +399,36 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             $retorno['pix_copia_cola'] = $pix_data['payload'];
             $retorno['status_venda'] = 'PENDING';
 
+        } elseif ($metodo === 'pix_and_boleto') {
+            $pix_val = floatval($params['pix_value']);
+            $boleto_val = $valor_total - $pix_val;
+            
+            if ($boleto_val <= 0 || $pix_val <= 0 || abs(($pix_val + $boleto_val) - $valor_total) > 0.05) {
+                return new WP_Error('erro_valor', 'Valores de Pix e Boleto inválidos.', array('status' => 400));
+            }
+            
+            // Criação da cobrança do BOLETO
+            // Colocamos o external_ref no boleto. Isso é o que vai disparar o acesso!
+            $resp_boleto = reiki_asaas_cobranca($customer_id, 'BOLETO', $boleto_val, date('Y-m-d', strtotime('+1 days')), $descricao_compra_final . ' (Parte Boleto)', $external_ref_base);
+            if (is_wp_error($resp_boleto)) return $resp_boleto; 
+            
+            // Criação da cobrança do PIX
+            // O PIX ganha um sufixo especial para NÃO liberar acesso isoladamente.
+            $pix_external_ref = $external_ref_base . '|PIX_ENTRY_IGNORE';
+            
+            $resp_pix = reiki_asaas_cobranca($customer_id, 'PIX', $pix_val, date('Y-m-d', strtotime('+1 days')), $descricao_compra_final . ' (Entrada PIX)', $pix_external_ref);
+            if (is_wp_error($resp_pix)) {
+                reiki_asaas_cancelar($resp_boleto['id']);
+                return $resp_pix;
+            }
+            
+            $pix_qr = wp_remote_get( $base_url . '/payments/' . $resp_pix['id'] . '/pixQrCode', array('headers' => $headers) );
+            $pix_data = json_decode( wp_remote_retrieve_body( $pix_qr ), true );
+            $retorno['pix_qrcode'] = $pix_data['encodedImage'];
+            $retorno['pix_copia_cola'] = $pix_data['payload'];
+            $retorno['boleto_url'] = $resp_boleto['bankSlipUrl'];
+            $retorno['status_venda'] = 'PENDING';
+
         } else {
             // Fluxo NORMAL
             $billing_type = strtoupper($metodo);

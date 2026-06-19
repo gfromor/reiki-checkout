@@ -69,7 +69,7 @@ const ORDER_BUMPS = [
   }
 ];
 
-type PaymentMethod = 'credit_card' | 'pix' | 'boleto' | 'two_cards' | 'pix_and_card';
+type PaymentMethod = 'credit_card' | 'pix' | 'boleto' | 'two_cards' | 'pix_and_card' | 'pix_and_boleto';
 type Currency = 'BRL' | 'USD' | 'EUR';
 
 function isValidCPF(cpf: string) {
@@ -170,6 +170,7 @@ function CheckoutForm() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pixData, setPixData] = useState<{ qrcode: string, copia_cola: string } | null>(null);
+  const [boletoUrl, setBoletoUrl] = useState<string | null>(null);
 
   const searchParams = new URLSearchParams(window.location.search);
   const productId = searchParams.get('produto') || 'cuidar';
@@ -277,6 +278,9 @@ function CheckoutForm() {
         const cardVal = Math.max(0, basePrice - pixVal);
         const rate = INTEREST_RATES[installments] || 0;
         return pixVal + (cardVal * (1 + rate / 100));
+      } else if (paymentMethod === 'pix_and_boleto') {
+        // Sem juros para boleto à vista
+        return basePrice;
       }
     }
     return basePrice;
@@ -320,6 +324,13 @@ function CheckoutForm() {
         if (!ccName2.includes(' ')) newErrors.ccName2 = 'Nome 2º cartão incompleto';
         if (ccExpiry2.length < 5) newErrors.ccExpiry2 = 'Validade 2º cartão incompleta';
         if (ccCvv2.length < 3) newErrors.ccCvv2 = 'CVV 2º cartão inválido';
+      }
+    }
+
+    if (currency === 'BRL' && paymentMethod === 'pix_and_boleto') {
+      const pixVal = Number(pixEntryValue) || 0;
+      if (pixVal <= 0 || pixVal >= total) {
+        newErrors.pixEntryValue = 'A entrada no Pix deve ser maior que 0 e menor que o valor total.';
       }
     }
 
@@ -411,6 +422,11 @@ function CheckoutForm() {
         };
         payload.cep = cep.replace(/\D/g, '');
         payload.numero = numero;
+    } else if (paymentMethod === 'pix_and_boleto') {
+        const pixVal = Number(pixEntryValue) || 0;
+        payload.pix_value = pixVal;
+        payload.cep = cep.replace(/\D/g, '');
+        payload.numero = numero;
     }
 
     // 4. Enviar para o WordPress (EAD)
@@ -442,8 +458,11 @@ function CheckoutForm() {
         }
       } else {
         setIsSuccess(true);
-        if (data.metodo === 'PIX') {
+        if (data.pix_qrcode) {
           setPixData({ qrcode: data.pix_qrcode, copia_cola: data.pix_copia_cola });
+        }
+        if (data.boleto_url) {
+          setBoletoUrl(data.boleto_url);
         }
       }
     } catch (err) {
@@ -461,14 +480,31 @@ function CheckoutForm() {
           <CheckCircle2 className="w-20 h-20 text-emerald-500 mx-auto mb-6" />
           <h2 className="text-2xl font-bold text-stone-800 mb-2">Pedido Confirmado!</h2>
           
-          {pixData ? (
+          {pixData || boletoUrl ? (
             <div className="mt-6 text-left">
-              <p className="text-stone-600 mb-4 text-center">Escaneie o QR Code abaixo para pagar:</p>
-              <img src={`data:image/png;base64,${pixData.qrcode}`} alt="PIX QR Code" className="mx-auto w-48 h-48 border rounded-lg p-2 mb-4" />
-              <div className="bg-stone-100 p-3 rounded-lg text-xs break-all border border-stone-200">
-                {pixData.copia_cola}
-              </div>
-              <p className="text-xs text-stone-500 text-center mt-3">A liberação do seu acesso será automática assim que o Pix for pago.</p>
+              {pixData && (
+                <>
+                  <p className="text-stone-600 mb-4 text-center">Escaneie o QR Code abaixo para pagar a sua entrada no Pix:</p>
+                  <img src={`data:image/png;base64,${pixData.qrcode}`} alt="PIX QR Code" className="mx-auto w-48 h-48 border rounded-lg p-2 mb-4" />
+                  <div className="bg-stone-100 p-3 rounded-lg text-xs break-all border border-stone-200">
+                    {pixData.copia_cola}
+                  </div>
+                </>
+              )}
+              {boletoUrl && (
+                <div className="mt-6 border-t pt-6">
+                  <p className="text-stone-600 mb-4 text-center">Gere o seu boleto abaixo para o restante do pagamento:</p>
+                  <a href={boletoUrl} target="_blank" rel="noreferrer" className="block w-full py-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-bold text-center transition-colors">
+                    📄 Visualizar Boleto
+                  </a>
+                  <p className="text-xs text-stone-500 text-center mt-3">
+                    <strong>Atenção:</strong> O acesso ao curso será enviado para seu e-mail apenas após a compensação do Boleto.
+                  </p>
+                </div>
+              )}
+              {!boletoUrl && pixData && (
+                 <p className="text-xs text-stone-500 text-center mt-3">A liberação do seu acesso será automática assim que o Pix for pago.</p>
+              )}
             </div>
           ) : (
             <p className="text-stone-600 mt-4">Você receberá os dados de acesso no seu e-mail em instantes. Bem-vindo(a) à formação!</p>
@@ -589,7 +625,7 @@ function CheckoutForm() {
             </h2>
             
             {currency === 'BRL' && (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-2 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2 md:gap-2 mb-6">
                 <button type="button" onClick={() => { setPaymentMethod('credit_card'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'credit_card' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
                   <CreditCard className="w-5 h-5" />
                   <span className="text-xs font-medium">Cartão</span>
@@ -610,13 +646,17 @@ function CheckoutForm() {
                   <Receipt className="w-5 h-5" />
                   <span className="text-xs font-medium text-center leading-tight">Boleto</span>
                 </button>
+                <button type="button" onClick={() => { setPaymentMethod('pix_and_boleto'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'pix_and_boleto' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
+                  <div className="flex -space-x-1"><QrCode className="w-5 h-5" /><Receipt className="w-5 h-5 opacity-50" /></div>
+                  <span className="text-[10px] md:text-xs font-medium text-center leading-tight">Pix + Boleto</span>
+                </button>
               </div>
             )}
 
-            {currency === 'BRL' && (paymentMethod === 'credit_card' || paymentMethod === 'two_cards' || paymentMethod === 'pix_and_card') && (
+            {currency === 'BRL' && (paymentMethod === 'credit_card' || paymentMethod === 'two_cards' || paymentMethod === 'pix_and_card' || paymentMethod === 'pix_and_boleto') && (
               <div className="space-y-6 animate-in fade-in">
                 
-                {paymentMethod === 'pix_and_card' && (
+                {(paymentMethod === 'pix_and_card' || paymentMethod === 'pix_and_boleto') && (
                   <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl">
                     <h3 className="font-bold text-emerald-800 mb-3 flex items-center gap-2"><QrCode className="w-5 h-5"/> Valor no Pix</h3>
                     <div>
@@ -625,7 +665,7 @@ function CheckoutForm() {
                          let val = e.target.value.replace(/[^0-9.]/g, '');
                          setPixEntryValue(val);
                       }} type="text" className="w-full border border-emerald-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
-                      <p className="text-xs text-emerald-600 mt-2">O restante será cobrado no cartão de crédito abaixo.</p>
+                      <p className="text-xs text-emerald-600 mt-2">O restante será cobrado no {paymentMethod === 'pix_and_card' ? 'cartão de crédito abaixo' : 'boleto à vista'}.</p>
                     </div>
                   </div>
                 )}
