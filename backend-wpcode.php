@@ -89,7 +89,7 @@ function reiki_asaas_cobranca($customer_id, $billing_type, $valor, $vencimento, 
 // 2. Configurações Iniciais do STRIPE
 define('REIKI_STRIPE_SECRET_KEY', ''); // Chave removida
 define('REIKI_STRIPE_WEBHOOK_SECRET', ''); // <--- Coloque o Signing Secret (whsec_...) aqui
-define('REIKI_TURNSTILE_SECRET_KEY', '1x0000000000000000000000000000000AA'); // <--- Chave Secreta do Cloudflare Turnstile
+define('REIKI_TURNSTILE_SECRET_KEY', '0x4AAAAAADneoKJAc7ubssOZrEcE-tzKov8'); // <--- Chave Secreta do Cloudflare Turnstile
 
 // 3. Catálogo de Produtos e IDs do WooCommerce Memberships
 function get_reiki_products() {

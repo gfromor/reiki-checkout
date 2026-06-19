@@ -972,9 +972,8 @@ function CheckoutForm() {
             </button>
             {errors.turnstile && <p className="text-red-500 text-xs mt-2 text-center">{errors.turnstile}</p>}
             <div className="mt-4 flex justify-center">
-              {/* CHAVE DE TESTE: 1x00000000000000000000AA. Substitua pela chave real do Cloudflare Turnstile */}
               <Turnstile 
-                siteKey="1x00000000000000000000AA" 
+                siteKey="0x4AAAAAADneoKhkuUxCMoVf" 
                 onSuccess={(token) => setTurnstileToken(token)}
                 options={{ theme: 'light' }}
               />
