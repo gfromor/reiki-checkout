@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CreditCard, QrCode, Receipt, ShieldCheck, Lock, Globe, Loader2, CheckCircle2 } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { Turnstile } from '@marsidev/react-turnstile';
 
 // Chave Pública do Stripe (Pegue no Painel da Reiki Time Academy)
 const stripePromise = loadStripe('pk_live_51M4X8UJCAiZy2d8TofsRm9xrvVjItsdR1XycJvZFG1vYuYbecbGZLuGGpQLqVLUITrLon7v7g0Rz0Q0sK5zJSXSF006dJtMiSx');
@@ -140,6 +141,7 @@ function CheckoutForm() {
   const [numero, setNumero] = useState('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   
   const [selectedBumps, setSelectedBumps] = useState<string[]>([]);
 
@@ -345,6 +347,12 @@ function CheckoutForm() {
       setErrors(newErrors);
       return;
     }
+
+    if (!turnstileToken) {
+      setErrors({ turnstile: 'Verificação de segurança pendente. Aguarde ou recarregue a página.' });
+      return;
+    }
+
     setErrors({});
     setIsLoading(true);
 
@@ -358,6 +366,7 @@ function CheckoutForm() {
       parcelas: installments,
       metodo: paymentMethod,
       bumps: selectedBumps,
+      turnstileToken: turnstileToken,
       cupom: couponCode || ''
     };
 
@@ -958,9 +967,18 @@ function CheckoutForm() {
               </div>
             </div>
 
-            <button disabled={isLoading} type="submit" className={`w-full text-white font-bold py-4 rounded-xl shadow-lg transition-all text-lg flex items-center justify-center gap-2 disabled:opacity-50 ${currency === 'BRL' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}>
+            <button disabled={isLoading || !turnstileToken} type="submit" className={`w-full text-white font-bold py-4 rounded-xl shadow-lg transition-all text-lg flex items-center justify-center gap-2 disabled:opacity-50 ${currency === 'BRL' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}>
               {isLoading ? <><Loader2 className="w-5 h-5 animate-spin" /> Processando...</> : <><ShieldCheck className="w-5 h-5" /> Finalizar Compra {currency !== 'BRL' ? 'Internacional' : 'Segura'}</>}
             </button>
+            {errors.turnstile && <p className="text-red-500 text-xs mt-2 text-center">{errors.turnstile}</p>}
+            <div className="mt-4 flex justify-center">
+              {/* CHAVE DE TESTE: 1x00000000000000000000AA. Substitua pela chave real do Cloudflare Turnstile */}
+              <Turnstile 
+                siteKey="1x00000000000000000000AA" 
+                onSuccess={(token) => setTurnstileToken(token)}
+                options={{ theme: 'light' }}
+              />
+            </div>
             <div className="mt-6 flex items-center justify-center gap-2 text-xs text-stone-400">
               <Lock className="w-3 h-3" /> Seus dados estão criptografados ({currency === 'BRL' ? 'Asaas' : 'Stripe'})
             </div>

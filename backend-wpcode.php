@@ -89,6 +89,7 @@ function reiki_asaas_cobranca($customer_id, $billing_type, $valor, $vencimento, 
 // 2. Configurações Iniciais do STRIPE
 define('REIKI_STRIPE_SECRET_KEY', ''); // Chave removida
 define('REIKI_STRIPE_WEBHOOK_SECRET', ''); // <--- Coloque o Signing Secret (whsec_...) aqui
+define('REIKI_TURNSTILE_SECRET_KEY', '1x0000000000000000000000000000000AA'); // <--- Chave Secreta do Cloudflare Turnstile
 
 // 3. Catálogo de Produtos e IDs do WooCommerce Memberships
 function get_reiki_products() {
@@ -248,6 +249,29 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
 
     $produtos = get_reiki_products();
     $params = $request->get_json_params();
+
+    // 0. Cloudflare Turnstile Validation
+    $turnstile_token = isset($params['turnstileToken']) ? sanitize_text_field($params['turnstileToken']) : '';
+    if (empty($turnstile_token)) {
+        return new WP_Error('seguranca', 'Validação anti-bot ausente.', array('status' => 403));
+    }
+    
+    $turnstile_verify = wp_remote_post('https://challenges.cloudflare.com/turnstile/v0/siteverify', array(
+        'body' => array(
+            'secret'   => REIKI_TURNSTILE_SECRET_KEY,
+            'response' => $turnstile_token,
+            'remoteip' => isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : ''
+        )
+    ));
+    
+    if (is_wp_error($turnstile_verify)) {
+        return new WP_Error('seguranca', 'Erro de conexão com servidor anti-bot.', array('status' => 500));
+    }
+    
+    $turnstile_body = json_decode(wp_remote_retrieve_body($turnstile_verify), true);
+    if (empty($turnstile_body['success'])) {
+        return new WP_Error('seguranca', 'Falha na verificação de segurança.', array('status' => 403));
+    }
 
     $gateway = sanitize_text_field( $params['gateway'] );
     $nome = sanitize_text_field( $params['nome'] );
@@ -416,6 +440,11 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
             $resp_card = reiki_asaas_cobranca($customer_id, 'CREDIT_CARD', $card['value'], date('Y-m-d'), $descricao_compra_final . ' (Parte Cartão)', $external_ref_base, $c_data, true);
             if (is_wp_error($resp_card)) return $resp_card; // Falhou o cartão, nem gera o PIX
             
+            // NOVO: Agenda a verificação de segurança em 30 min (garante que o limite seja estornado se tudo falhar)
+            if (function_exists('wp_schedule_single_event')) {
+                wp_schedule_single_event(time() + 1800, 'reiki_verificar_cartao_preso', array($resp_card['id']));
+            }
+            
             // Cartão pré-autorizado! Esconde o ID do Cartão na externalReference do PIX
             $pix_external_ref = $external_ref_base . '|' . $resp_card['id']; 
             
@@ -578,6 +607,14 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
             $parts = explode('|', $payment['externalReference']);
             if ( count($parts) >= 2 ) {
                 $wp_user_id = intval($parts[0]);
+                
+                // Idempotência
+                $payment_id = $payment['id'];
+                if (get_user_meta( $wp_user_id, '_asaas_processed_' . $payment_id, true )) {
+                    return rest_ensure_response( array('recebido' => true, 'msg' => 'Idempotência: Evento já processado.') );
+                }
+                update_user_meta( $wp_user_id, '_asaas_processed_' . $payment_id, true );
+
                 $produto_id = sanitize_text_field($parts[1]);
                 
                 // Pagamento Híbrido: Captura o cartão se existir ID atrelado
@@ -673,6 +710,14 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
         $payment_intent = $payload['data']['object'];
         if ( !empty($payment_intent['metadata']['wp_user_id']) && !empty($payment_intent['metadata']['produto_id']) ) {
             $wp_user_id = intval($payment_intent['metadata']['wp_user_id']);
+            
+            // Idempotência
+            $payment_id = $payment_intent['id'];
+            if (get_user_meta( $wp_user_id, '_stripe_processed_' . $payment_id, true )) {
+                return rest_ensure_response( array('recebido' => true, 'msg' => 'Idempotência: Evento já processado.') );
+            }
+            update_user_meta( $wp_user_id, '_stripe_processed_' . $payment_id, true );
+
             $produto_id = sanitize_text_field($payment_intent['metadata']['produto_id']);
             conceder_acesso_curso($wp_user_id, $produto_id);
             
@@ -1019,4 +1064,23 @@ function ead_email_ebook($nome, $url, $validade) {
     </div>
     </body></html>";
 }
+}
+}
+
+// =========================================================================
+// CRON JOB: Limpeza de Cartões Presos (Transações Híbridas)
+// =========================================================================
+add_action('reiki_verificar_cartao_preso', 'reiki_verificar_cartao_preso_callback');
+function reiki_verificar_cartao_preso_callback($payment_id) {
+    // Checa o status do pagamento no Asaas
+    $response = reiki_asaas_request('GET', '/payments/' . $payment_id);
+    if (!is_wp_error($response)) {
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        if (isset($body['status']) && $body['status'] === 'AUTHORIZED') {
+            // Se ainda está AUTHORIZED após 30 mins, o Pix/Boleto nunca foi pago ou o webhook falhou gravemente.
+            // Cancela para liberar o limite do cartão do cliente.
+            reiki_asaas_cancelar($payment_id);
+            error_log('CRON: Cartão preso ' . $payment_id . ' cancelado por expiração de segurança (30m).');
+        }
+    }
 }
