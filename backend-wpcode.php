@@ -1065,7 +1065,6 @@ function ead_email_ebook($nome, $url, $validade) {
     </body></html>";
 }
 }
-}
 
 // =========================================================================
 // CRON JOB: Limpeza de Cartões Presos (Transações Híbridas)
