@@ -142,6 +142,8 @@ function CheckoutForm() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [agreedTerms, setAgreedTerms] = useState(false);
+  const [agreedImmediateDelivery, setAgreedImmediateDelivery] = useState(false);
   
   const [selectedBumps, setSelectedBumps] = useState<string[]>([]);
 
@@ -177,6 +179,16 @@ function CheckoutForm() {
   const searchParams = new URLSearchParams(window.location.search);
   const productId = searchParams.get('produto') || 'cuidar';
   const product = PRODUCTS[productId] || PRODUCTS['cuidar'];
+
+  const getImmediateDeliveryText = () => {
+    if (productId === 'cuidar') {
+      return 'Compreendo que este é um treinamento com encontros ao vivo. Ao confirmar a compra, garanto minha vaga e reconheço as regras de participação e garantia aplicáveis.';
+    } else if (productId === 'cer') {
+      return 'Compreendo que receberei acesso imediato a mais de 300 aulas gravadas, além dos encontros quinzenais ao vivo. Por solicitar o acesso instantâneo ao conteúdo digital, reconheço que estou abrindo mão do direito de arrependimento (Art. 49 do CDC), não havendo reembolso após o acesso.';
+    } else {
+      return 'Compreendo que este é um produto digital de consumo imediato. Ao confirmar a compra, solicito acesso instantâneo ao material e reconheço que, por sua natureza digital, estou abrindo mão do direito de arrependimento de 7 dias (Art. 49 do CDC), não havendo reembolso.';
+    }
+  };
   
   const [couponCode, setCouponCode] = useState<string | null>(searchParams.get('cupom'));
   const [couponDiscount, setCouponDiscount] = useState<{ type: string, amount: number } | null>(null);
@@ -295,6 +307,9 @@ function CheckoutForm() {
     e.preventDefault();
     setServerError(null);
     const newErrors: Record<string, string> = {};
+
+    if (!agreedTerms) newErrors.agreedTerms = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade.';
+    if (!agreedImmediateDelivery) newErrors.agreedImmediateDelivery = 'Você precisa confirmar as regras de acesso do treinamento escolhido.';
 
     if (!nome.includes(' ')) newErrors.nome = 'Digite seu nome completo';
     if (!email.includes('@')) newErrors.email = 'E-mail inválido';
@@ -967,10 +982,54 @@ function CheckoutForm() {
               </div>
             </div>
 
+            <div className="space-y-4 mb-8 bg-stone-50 p-4 rounded-xl border border-stone-200">
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <div className="relative flex items-center justify-center pt-0.5">
+                  <input type="checkbox" checked={agreedImmediateDelivery} onChange={(e) => setAgreedImmediateDelivery(e.target.checked)} className="sr-only" />
+                  <div className={`w-5 h-5 border-2 rounded transition-all flex items-center justify-center ${agreedImmediateDelivery ? 'bg-emerald-500 border-emerald-500' : 'border-stone-400 bg-white group-hover:border-emerald-400'}`}>
+                    {agreedImmediateDelivery && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <p className={`text-xs leading-tight transition-colors ${errors.agreedImmediateDelivery ? 'text-red-600' : 'text-stone-700'}`}>
+                    {getImmediateDeliveryText()}
+                  </p>
+                  {errors.agreedImmediateDelivery && <p className="text-red-500 text-xs mt-1 font-medium">{errors.agreedImmediateDelivery}</p>}
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <div className="relative flex items-center justify-center pt-0.5">
+                  <input type="checkbox" checked={agreedTerms} onChange={(e) => setAgreedTerms(e.target.checked)} className="sr-only" />
+                  <div className={`w-5 h-5 border-2 rounded transition-all flex items-center justify-center ${agreedTerms ? 'bg-emerald-500 border-emerald-500' : 'border-stone-400 bg-white group-hover:border-emerald-400'}`}>
+                    {agreedTerms && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <p className={`text-xs leading-tight transition-colors ${errors.agreedTerms ? 'text-red-600' : 'text-stone-700'}`}>
+                    Li e concordo com os <a href="https://ead.reikitimeacademy.com.br/termos-de-uso/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Termos de Uso</a> e <a href="https://ead.reikitimeacademy.com.br/politica-de-privacidade/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Política de Privacidade</a>.
+                  </p>
+                  {errors.agreedTerms && <p className="text-red-500 text-xs mt-1 font-medium">{errors.agreedTerms}</p>}
+                </div>
+              </label>
+            </div>
+
             <button disabled={isLoading || !turnstileToken} type="submit" className={`w-full text-white font-bold py-4 rounded-xl shadow-lg transition-all text-lg flex items-center justify-center gap-2 disabled:opacity-50 ${currency === 'BRL' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}>
               {isLoading ? <><Loader2 className="w-5 h-5 animate-spin" /> Processando...</> : <><ShieldCheck className="w-5 h-5" /> Finalizar Compra {currency !== 'BRL' ? 'Internacional' : 'Segura'}</>}
             </button>
             {errors.turnstile && <p className="text-red-500 text-xs mt-2 text-center">{errors.turnstile}</p>}
+            
+            {/* TEXTOS LEGAIS DINÂMICOS */}
+            {productId !== 'cuidar' && productId !== 'cer' ? (
+              <div className="mt-5 px-2 text-[11px] text-stone-500 text-center leading-relaxed">
+                Ao finalizar a compra, concordo com os <a href="https://ead.reikitimeacademy.com.br/termos-de-uso/" target="_blank" rel="noreferrer" className="underline hover:text-stone-800">Termos de Uso</a> e <a href="https://ead.reikitimeacademy.com.br/politica-de-privacidade/" target="_blank" rel="noreferrer" className="underline hover:text-stone-800">Política de Privacidade</a>. Reconheço que, por se tratar de um infoproduto com acesso imediato, <strong>abro mão do direito de arrependimento de 7 dias</strong>, conforme a <a href="https://ead.reikitimeacademy.com.br/politica-de-reembolso/" target="_blank" rel="noreferrer" className="underline hover:text-stone-800">Política de Reembolso</a>.
+              </div>
+            ) : (
+              <div className="mt-5 px-2 text-[11px] text-stone-500 text-center leading-relaxed">
+                Ao finalizar a compra, concordo com os <a href="https://ead.reikitimeacademy.com.br/termos-de-uso/" target="_blank" rel="noreferrer" className="underline hover:text-stone-800">Termos de Uso</a>, <a href="https://ead.reikitimeacademy.com.br/politica-de-privacidade/" target="_blank" rel="noreferrer" className="underline hover:text-stone-800">Privacidade</a> e com nossa <a href="https://ead.reikitimeacademy.com.br/politica-de-reembolso/" target="_blank" rel="noreferrer" className="underline hover:text-stone-800">Política de Reembolso</a>.
+              </div>
+            )}
+
             <div className="mt-4 flex justify-center">
               <Turnstile 
                 siteKey="0x4AAAAAADneoKhkuUxCMoVf" 
