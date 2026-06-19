@@ -414,7 +414,7 @@ function processar_checkout_universal( WP_REST_Request $request ) {
             
             // Criação da cobrança do PIX
             // O PIX ganha um sufixo especial para NÃO liberar acesso isoladamente.
-            $pix_external_ref = $external_ref_base . '|PIX_ENTRY_IGNORE';
+            $pix_external_ref = $external_ref_base . '|BOLETO:' . $resp_boleto['id'];
             
             $resp_pix = reiki_asaas_cobranca($customer_id, 'PIX', $pix_val, date('Y-m-d', strtotime('+1 days')), $descricao_compra_final . ' (Entrada PIX)', $pix_external_ref);
             if (is_wp_error($resp_pix)) {
@@ -550,10 +550,14 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
                 
                 // Pagamento Híbrido: Captura o cartão se existir ID atrelado
                 if (isset($parts[4]) && !empty($parts[4])) {
-                    $capture_card_id = sanitize_text_field($parts[4]);
-                    $cap_result = reiki_asaas_capturar($capture_card_id);
+                    $target_id = sanitize_text_field($parts[4]);
+                    if (strpos($target_id, 'BOLETO:') === 0) {
+                        // É o PIX de entrada. NÃO libera acesso. Aguarda o Boleto.
+                        return rest_ensure_response( array('recebido' => true, 'msg' => 'Pix de entrada. Acesso aguarda boleto.') );
+                    }
+                    $cap_result = reiki_asaas_capturar($target_id);
                     if (is_wp_error($cap_result)) {
-                        error_log('ALERTA: Captura do cartão ' . $capture_card_id . ' falhou no webhook Pix+Cartão');
+                        error_log('ALERTA: Captura do cartão ' . $target_id . ' falhou no webhook Pix+Cartão');
                     }
                 }
 
@@ -578,9 +582,15 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
         if ( !empty($payment['externalReference']) && $payment['billingType'] === 'PIX' ) {
             $parts = explode('|', $payment['externalReference']);
             if ( count($parts) >= 5 ) {
-                $capture_card_id = sanitize_text_field($parts[4]);
-                reiki_asaas_cancelar($capture_card_id);
-                error_log('Webhook Híbrido: PIX expirado/deletado. Autorização do cartão ' . $capture_card_id . ' cancelada.');
+                $target_id = sanitize_text_field($parts[4]);
+                if (strpos($target_id, 'BOLETO:') === 0) {
+                    $boleto_id = str_replace('BOLETO:', '', $target_id);
+                    reiki_asaas_cancelar($boleto_id);
+                    error_log('Webhook Híbrido: PIX expirado. Boleto vinculado ' . $boleto_id . ' cancelado.');
+                } else {
+                    reiki_asaas_cancelar($target_id);
+                    error_log('Webhook Híbrido: PIX expirado. Autorização do cartão ' . $target_id . ' cancelada.');
+                }
             }
         }
     }

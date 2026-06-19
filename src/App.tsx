@@ -664,7 +664,8 @@ function CheckoutForm() {
                       <input value={pixEntryValue} onChange={e => {
                          let val = e.target.value.replace(/[^0-9.]/g, '');
                          setPixEntryValue(val);
-                      }} type="text" className="w-full border border-emerald-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
+                      }} type="text" className={`w-full border ${errors.pixEntryValue ? 'border-red-500' : 'border-emerald-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
+                      {errors.pixEntryValue && <p className="text-red-500 text-xs mt-1">{errors.pixEntryValue}</p>}
                       <p className="text-xs text-emerald-600 mt-2">
                         O restante {pixEntryValue && !isNaN(Number(pixEntryValue)) ? `(R$ ${Math.max(0, basePrice - Number(pixEntryValue)).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}) ` : ''} 
                         será cobrado no {paymentMethod === 'pix_and_card' ? 'cartão de crédito abaixo' : 'boleto à vista'}.
