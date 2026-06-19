@@ -216,16 +216,19 @@ function CheckoutForm() {
   // ── LEAD CAPTURE AUTOMÁTICO ──
   // Dispara o POST /lead em background quando o usuário preenche nome + email.
   // Usa useRef para garantir que só dispara UMA VEZ por sessão (não a cada keystroke).
-  const leadSentRef = useRef(false);
+  const leadSentRef = useRef<string>('');
 
   useEffect(() => {
-    // Só dispara se: nome tem sobrenome, email tem @, e ainda não enviou nesta sessão
-    if (leadSentRef.current) return;
+    // Só dispara se: nome tem sobrenome e email tem @
     if (!nome.includes(' ') || !email.includes('@')) return;
+
+    // Evita chamadas repetidas com os exatos mesmos dados
+    const currentData = JSON.stringify({ nome, email, telefone });
+    if (leadSentRef.current === currentData) return;
 
     // Debounce de 2 segundos — espera o usuário parar de digitar
     const timer = setTimeout(() => {
-      leadSentRef.current = true; // Marca como enviado para não repetir
+      leadSentRef.current = currentData; // Atualiza a ref com o último envio
 
       const formData = new URLSearchParams();
       formData.append("nome", nome);
