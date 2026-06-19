@@ -665,7 +665,10 @@ function CheckoutForm() {
                          let val = e.target.value.replace(/[^0-9.]/g, '');
                          setPixEntryValue(val);
                       }} type="text" className="w-full border border-emerald-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
-                      <p className="text-xs text-emerald-600 mt-2">O restante será cobrado no {paymentMethod === 'pix_and_card' ? 'cartão de crédito abaixo' : 'boleto à vista'}.</p>
+                      <p className="text-xs text-emerald-600 mt-2">
+                        O restante {pixEntryValue && !isNaN(Number(pixEntryValue)) ? `(R$ ${Math.max(0, basePrice - Number(pixEntryValue)).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}) ` : ''} 
+                        será cobrado no {paymentMethod === 'pix_and_card' ? 'cartão de crédito abaixo' : 'boleto à vista'}.
+                      </p>
                     </div>
                   </div>
                 )}
