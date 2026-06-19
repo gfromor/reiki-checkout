@@ -201,7 +201,31 @@ function validar_cupom_woocommerce( WP_REST_Request $request ) {
 function processar_checkout_universal( WP_REST_Request $request ) {
     $result = _processar_checkout_universal_internal($request);
     if ( is_wp_error($result) ) {
-        error_log('ERRO NO CHECKOUT: ' . $result->get_error_message() . ' | Codigo: ' . $result->get_error_code());
+        $error_msg = $result->get_error_message();
+        $error_code = $result->get_error_code();
+        
+        // Log básico
+        error_log('ERRO NO CHECKOUT: ' . $error_msg . ' | Codigo: ' . $error_code);
+        
+        // Enviar E-mail para o Admin
+        $admin_email = get_option('admin_email');
+        $subject = '⚠️ ALERTA: Erro no Checkout - Reiki Time Academy';
+        $message = "Ocorreu uma falha durante o processamento do checkout.\n\n";
+        $message .= "Código do Erro: " . $error_code . "\n";
+        $message .= "Mensagem: " . $error_msg . "\n\n";
+        
+        // Extrair alguns dados do cliente para facilitar o diagnóstico
+        $params = $request->get_json_params();
+        if ($params) {
+            $message .= "Dados da Tentativa:\n";
+            $message .= "Nome: " . (isset($params['nome']) ? sanitize_text_field($params['nome']) : 'N/A') . "\n";
+            $message .= "Email: " . (isset($params['email']) ? sanitize_email($params['email']) : 'N/A') . "\n";
+            $message .= "Método: " . (isset($params['payment_method']) ? sanitize_text_field($params['payment_method']) : 'N/A') . "\n";
+            $message .= "Gateway: " . (isset($params['currency']) && $params['currency'] === 'BRL' ? 'Asaas' : 'Stripe') . "\n";
+            $message .= "Produto ID: " . (isset($params['produto']) ? sanitize_text_field($params['produto']) : 'N/A') . "\n";
+        }
+        
+        wp_mail($admin_email, $subject, $message);
     }
     return $result;
 }
