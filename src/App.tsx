@@ -142,8 +142,8 @@ function CheckoutForm() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [agreedTerms, setAgreedTerms] = useState(false);
-  const [agreedImmediateDelivery, setAgreedImmediateDelivery] = useState(false);
+  const [agreedTerms, setAgreedTerms] = useState(true);
+  const [agreedImmediateDelivery, setAgreedImmediateDelivery] = useState(true);
   
   const [selectedBumps, setSelectedBumps] = useState<string[]>([]);
 
