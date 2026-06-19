@@ -684,11 +684,12 @@ function CheckoutForm() {
                   </div>
                 )}
 
-                <div className="bg-white border border-stone-200 p-4 rounded-xl space-y-4">
-                  <h3 className="font-bold text-stone-800 flex items-center gap-2">
-                    <CreditCard className="w-5 h-5"/> 
-                    {paymentMethod === 'two_cards' ? 'Dados do 1º Cartão' : 'Dados do Cartão'}
-                  </h3>
+                {(paymentMethod === 'credit_card' || paymentMethod === 'two_cards' || paymentMethod === 'pix_and_card') && (
+                  <div className="bg-white border border-stone-200 p-4 rounded-xl space-y-4">
+                    <h3 className="font-bold text-stone-800 flex items-center gap-2">
+                      <CreditCard className="w-5 h-5"/> 
+                      {paymentMethod === 'two_cards' ? 'Dados do 1º Cartão' : 'Dados do Cartão'}
+                    </h3>
                   <div>
                     <label className="block text-sm font-medium text-stone-600 mb-1">Número do Cartão</label>
                     <input value={ccNumber} onChange={e=>setCcNumber(e.target.value)} type="text" className={`w-full border ${errors.ccNumber ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none`} placeholder="0000 0000 0000 0000" />
@@ -731,7 +732,8 @@ function CheckoutForm() {
                       })}
                     </select>
                   </div>
-                </div>
+                  </div>
+                )}
 
                 {paymentMethod === 'two_cards' && (
                   <div className="bg-white border border-stone-200 p-4 rounded-xl space-y-4">
