@@ -327,10 +327,17 @@ function CheckoutForm() {
       }
     }
 
-    if (currency === 'BRL' && paymentMethod === 'pix_and_boleto') {
+    if (currency === 'BRL' && (paymentMethod === 'pix_and_boleto' || paymentMethod === 'pix_and_card')) {
       const pixVal = Number(pixEntryValue) || 0;
       if (pixVal <= 0 || pixVal >= total) {
         newErrors.pixEntryValue = 'A entrada no Pix deve ser maior que 0 e menor que o valor total.';
+      }
+    }
+
+    if (currency === 'BRL' && paymentMethod === 'two_cards') {
+      const c1Val = Number(card1EntryValue) || 0;
+      if (c1Val <= 0 || c1Val >= total) {
+        newErrors.card1EntryValue = 'O valor no 1º cartão deve ser maior que 0 e menor que o valor total.';
       }
     }
 
@@ -682,7 +689,8 @@ function CheckoutForm() {
                       <input value={card1EntryValue} onChange={e => {
                          let val = e.target.value.replace(/[^0-9.]/g, '');
                          setCard1EntryValue(val);
-                      }} type="text" className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-stone-500 outline-none" placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
+                      }} type="text" className={`w-full border ${errors.card1EntryValue ? 'border-red-500' : 'border-stone-300'} rounded-lg p-3 focus:ring-2 focus:ring-stone-500 outline-none`} placeholder={`Ex: ${Math.floor(basePrice/2)}`} />
+                      {errors.card1EntryValue && <p className="text-red-500 text-xs mt-1">{errors.card1EntryValue}</p>}
                       <p className="text-xs text-stone-500 mt-2">O restante será cobrado no 2º cartão automaticamente.</p>
                     </div>
                   </div>
