@@ -199,6 +199,14 @@ function validar_cupom_woocommerce( WP_REST_Request $request ) {
 // 1. CHECKOUT FRONTEND
 // =========================================================================
 function processar_checkout_universal( WP_REST_Request $request ) {
+    $result = _processar_checkout_universal_internal($request);
+    if ( is_wp_error($result) ) {
+        error_log('ERRO NO CHECKOUT: ' . $result->get_error_message() . ' | Codigo: ' . $result->get_error_code());
+    }
+    return $result;
+}
+
+function _processar_checkout_universal_internal( WP_REST_Request $request ) {
     $allowed_origins = array(
         'https://checkout.reikitimeacademy.com.br',
         'https://reiki-checkout.pages.dev'
