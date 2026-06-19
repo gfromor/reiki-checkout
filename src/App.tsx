@@ -1007,7 +1007,7 @@ function CheckoutForm() {
                 </div>
                 <div className="flex-1">
                   <p className={`text-xs leading-tight transition-colors ${errors.agreedTerms ? 'text-red-600' : 'text-stone-700'}`}>
-                    Li e concordo com os <a href="https://ead.reikitimeacademy.com.br/termos-de-uso/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Termos de Uso</a> e <a href="https://ead.reikitimeacademy.com.br/politica-de-privacidade/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Política de Privacidade</a>.
+                    Li e concordo com os <a href="https://cuidar.reikitimeacademy.com.br/termos-de-uso/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Termos de Uso</a> e <a href="https://cuidar.reikitimeacademy.com.br/politica-de-privacidade/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Política de Privacidade</a>.
                   </p>
                   {errors.agreedTerms && <p className="text-red-500 text-xs mt-1 font-medium">{errors.agreedTerms}</p>}
                 </div>
