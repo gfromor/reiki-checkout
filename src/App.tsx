@@ -34,6 +34,13 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     usdPrice: 17.00, eurPrice: 17.00,
     image: '/infinity.png'
   },
+  'desafio-infinity': {
+    title: 'Desafio Infinity',
+    subtitle: 'Imersão prática de 3 dias',
+    brlPrice: 67.00, brlOriginal: 697.00,
+    usdPrice: 17.00, eurPrice: 17.00,
+    image: '/infinity.png'
+  },
   'ebook': { 
     title: 'E-book Reiki Essencial', 
     subtitle: 'Download imediato (PDF)',
