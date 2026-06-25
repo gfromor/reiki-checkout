@@ -1,11 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { CreditCard, QrCode, Receipt, ShieldCheck, Lock, Globe, Loader2, CheckCircle2 } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Turnstile } from '@marsidev/react-turnstile';
 
 // Chave Pública do Stripe (Pegue no Painel da Reiki Time Academy)
 const stripePromise = loadStripe('pk_live_51M4X8UJCAiZy2d8TofsRm9xrvVjItsdR1XycJvZFG1vYuYbecbGZLuGGpQLqVLUITrLon7v7g0Rz0Q0sK5zJSXSF006dJtMiSx');
+
+const StripeInner = forwardRef((_, ref) => {
+   const stripe = useStripe();
+   const elements = useElements();
+   useImperativeHandle(ref, () => ({
+       confirm: async () => {
+           if (!stripe || !elements) return { error: { message: "Stripe indisponível" } };
+           const { error: submitError } = await elements.submit();
+           if (submitError) return { error: submitError };
+           return { stripe, elements };
+       }
+   }));
+   return <PaymentElement />;
+});
+
+const StripeWrapper = forwardRef(({ clientSecret }: { clientSecret: string }, ref) => {
+   if (!clientSecret) return <div className="text-stone-500 text-sm">Carregando carteiras seguras...</div>;
+   return (
+      <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe' } }}>
+         <StripeInner ref={ref} />
+      </Elements>
+   );
+});
 
 const INTEREST_RATES: Record<number, number> = {
   1: 0, 2: 7, 3: 8, 4: 9, 5: 10, 6: 11,
@@ -13,6 +36,15 @@ const INTEREST_RATES: Record<number, number> = {
 };
 
 const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number, image: string }> = {
+  'guardias': { 
+    title: 'Formação Guardiãs do Clã', 
+    subtitle: 'Turma Fundadora', 
+    brlPrice: 997, 
+    brlOriginal: 1297, 
+    usdPrice: 200, 
+    eurPrice: 175, 
+    image: 'https://reikitimeacademy.com.br/wp-content/uploads/2026/03/guardias-hero-bg.png' 
+  },
   'cuidar': { 
     title: 'Formação Método CUIDAR', 
     subtitle: 'Acesso completo + Bônus exclusivos',
@@ -33,6 +65,13 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     brlPrice: 67.00, brlOriginal: 697.00,
     usdPrice: 17.00, eurPrice: 17.00,
     image: '/infinity.png'
+  },
+  'reiki-florescer': {
+    title: 'Reiki Florescer',
+    subtitle: 'Acesso completo',
+    brlPrice: 297.00, brlOriginal: 497.00,
+    usdPrice: 60.00, eurPrice: 55.00,
+    image: '/infinity.png' // default image until they have a specific one
   },
   'desafio-infinity': {
     title: 'Desafio Infinity',
@@ -117,8 +156,9 @@ function isValidLuhn(number: string) {
 // FORMULÁRIO PRINCIPAL DE CHECKOUT (Envolto pelo Stripe Elements)
 // ----------------------------------------------------------------------
 function CheckoutForm() {
-  const stripe = useStripe();
-  const elements = useElements();
+  const stripeRef = useRef<any>(null);
+  const [clientSecret, setClientSecret] = useState('');
+  const [paymentIntentId, setPaymentIntentId] = useState('');
 
   const [currency, setCurrency] = useState<Currency>('BRL');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit_card');
@@ -149,6 +189,7 @@ function CheckoutForm() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<any>(null);
   const [agreedTerms, setAgreedTerms] = useState(true);
   const [agreedImmediateDelivery, setAgreedImmediateDelivery] = useState(true);
   
@@ -220,6 +261,36 @@ function CheckoutForm() {
     }
   }, []);
 
+  useEffect(() => {
+    if (currency !== 'BRL') {
+      const fetchIntent = async () => {
+        setClientSecret('');
+        try {
+          const res = await fetch('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/stripe-intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              produto: productId,
+              currency,
+              bumps: selectedBumps,
+              cupom: couponCode || ''
+            })
+          });
+          const data = await res.json();
+          if (data.client_secret) {
+            setClientSecret(data.client_secret);
+            setPaymentIntentId(data.payment_intent_id);
+          }
+        } catch (e) {
+          console.error("Erro ao gerar intent", e);
+        }
+      };
+      // Debounce para não chamar a cada tick
+      const to = setTimeout(fetchIntent, 500);
+      return () => clearTimeout(to);
+    }
+  }, [currency, productId, selectedBumps, couponCode]);
+
   // ── LEAD CAPTURE AUTOMÁTICO ──
   // Dispara o POST /lead em background quando o usuário preenche nome + email.
   // Usa useRef para garantir que só dispara UMA VEZ por sessão (não a cada keystroke).
@@ -240,10 +311,11 @@ function CheckoutForm() {
       const formData = new URLSearchParams();
       formData.append("nome", nome);
       formData.append("email", email);
+      formData.append("produto", productId);
       if (telefone) formData.append("telefone", telefone);
 
       // Fire-and-forget — não bloqueia nada, falha silenciosa
-      fetch("https://reikitimeacademy.com.br/wp-json/cuidar/v1/lead", {
+      fetch("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/lead", {
         method: "POST",
         body: formData
       }).catch(() => {});
@@ -395,26 +467,67 @@ function CheckoutForm() {
       cupom: couponCode || ''
     };
 
-    // 2. Se for Stripe, geramos o Token primeiro
+    // 2. Se for Stripe, usamos o novo fluxo
     if (currency !== 'BRL') {
-      if (!stripe || !elements) {
+      if (!stripeRef.current) {
         setServerError('O sistema de cartão não carregou corretamente. Recarregue a página.');
         setIsLoading(false);
         return;
       }
-      const cardElement = elements.getElement(CardElement);
-      const { error, paymentMethod: stripePaymentMethod } = await stripe.createPaymentMethod({
-        type: 'card',
-        card: cardElement!,
-        billing_details: { name: nome, email: email }
-      });
-
-      if (error) {
-        setServerError(error.message || 'Erro no cartão');
+      
+      const { error: submitError, stripe, elements } = await stripeRef.current.confirm();
+      if (submitError) {
+        setServerError(submitError.message || 'Verifique os dados informados.');
         setIsLoading(false);
         return;
       }
-      payload.stripe_payment_method = stripePaymentMethod.id;
+      
+      payload.gateway = 'stripe_update';
+      payload.payment_intent_id = paymentIntentId;
+      
+      try {
+        const wpRes = await fetch("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const wpData = await wpRes.json();
+        
+        if (!wpRes.ok) {
+          turnstileRef.current?.reset();
+          setTurnstileToken(null);
+          setServerError(wpData.message || 'Erro ao processar pedido. Tente novamente.');
+          setIsLoading(false);
+          return;
+        }
+
+        const confirmRes = await stripe.confirmPayment({
+          elements,
+          clientSecret,
+          confirmParams: {
+            payment_method_data: {
+              billing_details: { name: nome, email: email }
+            }
+          },
+          redirect: 'if_required'
+        });
+
+        if (confirmRes.error) {
+          turnstileRef.current?.reset();
+          setTurnstileToken(null);
+          setServerError(confirmRes.error.message || 'Erro ao processar pagamento na Stripe.');
+          setIsLoading(false);
+          return;
+        }
+        
+        setIsSuccess(true);
+      } catch (err) {
+        turnstileRef.current?.reset();
+        setTurnstileToken(null);
+        setServerError('Falha de conexão com nossos servidores.');
+      }
+      setIsLoading(false);
+      return;
     } 
     // 3. Se for Asaas Cartão, pegamos os dados diretos
     else if (paymentMethod === 'credit_card') {
@@ -481,22 +594,9 @@ function CheckoutForm() {
       const data = await response.json();
 
       if (!response.ok) {
-        // Tratar erro retornado como OK, mas sucesso=false
-        if (!data.sucesso && data.requires_action && data.client_secret && stripe) {
-          const { error: actionError } = await stripe.handleNextAction({
-            clientSecret: data.client_secret
-          });
-          
-          if (actionError) {
-            setServerError(actionError.message || 'Falha na autenticação do banco (3D Secure).');
-            setIsLoading(false);
-            return;
-          }
-          // Se passou pela autenticação, consideramos sucesso na tela (o webhook libera o curso)
-          setIsSuccess(true);
-        } else {
-          setServerError(data.message || 'Erro no processamento da compra.');
-        }
+        turnstileRef.current?.reset();
+        setTurnstileToken(null);
+        setServerError(data.message || 'Erro no processamento da compra.');
       } else {
         setIsSuccess(true);
         if (data.pix_qrcode) {
@@ -507,6 +607,8 @@ function CheckoutForm() {
         }
       }
     } catch (err) {
+      turnstileRef.current?.reset();
+      setTurnstileToken(null);
       setServerError('Falha de conexão com o servidor. Verifique sua internet.');
     } finally {
       setIsLoading(false);
@@ -849,9 +951,7 @@ function CheckoutForm() {
                 <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
                   <label className="block text-sm font-medium text-stone-600 mb-2">Dados do Cartão (Protegido por Stripe)</label>
                   <div className="p-3 bg-white border border-stone-300 rounded-md">
-                    <CardElement options={{
-                      style: { base: { fontSize: '16px', color: '#424770', '::placeholder': { color: '#aab7c4' } } }
-                    }} />
+                    <StripeWrapper ref={stripeRef} clientSecret={clientSecret} />
                   </div>
                 </div>
                 <p className="text-xs text-stone-500 text-center"><Lock className="w-3 h-3 inline" /> Seus dados não passam por nossos servidores.</p>
@@ -1042,6 +1142,7 @@ function CheckoutForm() {
 
             <div className="mt-4 flex justify-center">
               <Turnstile 
+                ref={turnstileRef}
                 siteKey="0x4AAAAAADneoKhkuUxCMoVf" 
                 onSuccess={(token) => setTurnstileToken(token)}
                 options={{ theme: 'light' }}
@@ -1060,8 +1161,6 @@ function CheckoutForm() {
 // O App envelopa o formulário no Provedor do Stripe
 export default function App() {
   return (
-    <Elements stripe={stripePromise}>
-      <CheckoutForm />
-    </Elements>
+    <CheckoutForm />
   );
 }
