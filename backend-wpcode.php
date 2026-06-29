@@ -363,11 +363,46 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'tx-log-1', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'paystatus-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
     ) );
+}
+
+// Status de um pagamento (T4.3) — usado pelo checkout pra atualizar a tela quando o PIX/boleto é pago.
+// Público, sem PII (só devolve paid/status), com cache curto e rate limit.
+function reiki_payment_status_api( WP_REST_Request $request ) {
+    $allowed = array('https://checkout.reikitimeacademy.com.br', 'https://reiki-checkout.pages.dev', 'http://localhost:5173');
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+    if (in_array($origin, $allowed)) header("Access-Control-Allow-Origin: " . $origin);
+    header("Vary: Origin");
+    header("Access-Control-Allow-Methods: GET, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type");
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) return rest_ensure_response( array('status' => 'ok') );
+
+    $payment_id = sanitize_text_field( $request->get_param('payment_id') );
+    if (empty($payment_id)) return new WP_Error('erro', 'payment_id ausente', array('status' => 400));
+
+    if (!reiki_admin_rate('paystatus', 200, 600)) {
+        return rest_ensure_response(array('paid' => false, 'status' => 'rate_limited'));
+    }
+
+    // Cache curto (4s) p/ não martelar o Asaas se houver vários polls/abas
+    $cache_key = 'reiki_paystatus_' . md5($payment_id);
+    $cached = get_transient($cache_key);
+    if (is_array($cached)) return rest_ensure_response($cached);
+
+    $resp = reiki_asaas_request('GET', '/payments/' . $payment_id);
+    if (is_wp_error($resp)) return rest_ensure_response(array('paid' => false, 'status' => 'erro'));
+    $body = json_decode(wp_remote_retrieve_body($resp), true);
+    $status = isset($body['status']) ? $body['status'] : '';
+    $out = array(
+        'paid'   => in_array($status, array('RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH')),
+        'status' => $status,
+    );
+    set_transient($cache_key, $out, 4);
+    return rest_ensure_response($out);
 }
 
 // =========================================================================
@@ -407,6 +442,11 @@ add_action( 'rest_api_init', function () {
     register_rest_route( 'reiki/v1', '/catalog', array(
         'methods' => 'GET, OPTIONS',
         'callback' => 'reiki_catalog_api',
+        'permission_callback' => '__return_true'
+    ) );
+    register_rest_route( 'reiki/v1', '/payment-status', array(
+        'methods' => 'GET, OPTIONS',
+        'callback' => 'reiki_payment_status_api',
         'permission_callback' => '__return_true'
     ) );
     register_rest_route( 'reiki/v1', '/lead', array(
@@ -1087,9 +1127,13 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
             }
             
             if (is_wp_error($resp)) return $resp;
-            
+
             $retorno['status_venda'] = $resp['status'] ?? 'PENDING';
-            
+            // payment_id p/ o frontend acompanhar o status (T4.3) — só PIX/boleto fazem sentido aqui
+            if (in_array($billing_type, array('PIX', 'BOLETO')) && !empty($resp['id'])) {
+                $retorno['payment_id'] = $resp['id'];
+            }
+
             if ($billing_type == 'PIX' && !$is_assinatura) {
                 $pix_qr = wp_remote_get( $base_url . '/payments/' . $resp['id'] . '/pixQrCode', array('headers' => $headers) );
                 if (!is_wp_error($pix_qr)) {

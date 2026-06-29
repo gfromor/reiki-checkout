@@ -236,6 +236,8 @@ function CheckoutForm() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [pixData, setPixData] = useState<{ qrcode: string, copia_cola: string } | null>(null);
   const [boletoUrl, setBoletoUrl] = useState<string | null>(null);
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
   const searchParams = new URLSearchParams(window.location.search);
   const productId = searchParams.get('produto') || 'cuidar';
@@ -665,6 +667,9 @@ function CheckoutForm() {
         if (data.boleto_url) {
           setBoletoUrl(data.boleto_url);
         }
+        if (data.payment_id) {
+          setPaymentId(data.payment_id);
+        }
       }
     } catch (err: any) {
       turnstileRef.current?.reset();
@@ -677,6 +682,28 @@ function CheckoutForm() {
     }
   };
 
+  // T4.3: enquanto há PIX/boleto pendente, consulta o status; quando pago, a tela atualiza sozinha.
+  useEffect(() => {
+    if (!isSuccess || !paymentId || paymentConfirmed) return;
+    if (!pixData && !boletoUrl) return;
+    let active = true;
+    const startedAt = Date.now();
+    const poll = async () => {
+      if (!active || Date.now() - startedAt > 20 * 60 * 1000) return; // para após 20 min
+      try {
+        const res = await fetchWithTimeout(
+          `https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/payment-status?payment_id=${encodeURIComponent(paymentId)}`,
+          {}, 12000
+        );
+        const data = await res.json();
+        if (active && data?.paid) { setPaymentConfirmed(true); return; }
+      } catch { /* ignora e tenta de novo */ }
+      if (active) setTimeout(poll, 8000);
+    };
+    const t = setTimeout(poll, 8000);
+    return () => { active = false; clearTimeout(t); };
+  }, [isSuccess, paymentId, pixData, boletoUrl, paymentConfirmed]);
+
   // Tela de Sucesso
   if (isSuccess) {
     return (
@@ -685,7 +712,12 @@ function CheckoutForm() {
           <CheckCircle2 className="w-20 h-20 text-emerald-500 mx-auto mb-6" />
           <h2 className="text-2xl font-bold text-stone-800 mb-2">Pedido Confirmado!</h2>
           
-          {pixData || boletoUrl ? (
+          {paymentConfirmed ? (
+            <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-xl p-6 animate-in fade-in">
+              <p className="text-emerald-700 font-bold text-lg">✅ Pagamento confirmado!</p>
+              <p className="text-emerald-600 text-sm mt-1">Seu acesso foi liberado. Confira seu e-mail. Bem-vindo(a) à formação! ✨</p>
+            </div>
+          ) : pixData || boletoUrl ? (
             <div className="mt-6 text-left">
               {pixData && (
                 <>
@@ -709,6 +741,11 @@ function CheckoutForm() {
               )}
               {!boletoUrl && pixData && (
                  <p className="text-xs text-stone-500 text-center mt-3">A liberação do seu acesso será automática assim que o Pix for pago.</p>
+              )}
+              {paymentId && (
+                <p className="text-xs text-emerald-600 text-center mt-4 flex items-center justify-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Aguardando confirmação do pagamento...
+                </p>
               )}
             </div>
           ) : (
