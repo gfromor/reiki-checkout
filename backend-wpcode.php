@@ -363,7 +363,7 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'boleto-fix-1', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'tx-log-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
@@ -695,7 +695,15 @@ function processar_checkout_universal( WP_REST_Request $request ) {
         
         // Log básico
         error_log('ERRO NO CHECKOUT: ' . $error_msg . ' | Codigo: ' . $error_code);
-        
+        $p_err = $request->get_json_params();
+        reiki_log_tx('erro', array(
+            'gateway'    => is_array($p_err) ? ($p_err['gateway'] ?? '') : '',
+            'produto_id' => is_array($p_err) ? ($p_err['produto'] ?? '') : '',
+            'email'      => (is_array($p_err) && isset($p_err['email'])) ? sanitize_email($p_err['email']) : '',
+            'status'     => $error_code,
+            'detail'     => $error_msg,
+        ));
+
         // Lista de erros de negócio/bots que NÃO devem enviar e-mail para o admin
         $erros_ignorados = array('seguranca', 'erro_dados', 'rate_limit', 'recusado', 'invalido', 'erro_codigo', 'erro_parcelas', 'erro_valor', 'id_invalido');
         
@@ -1262,6 +1270,12 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
     }
 
     $payload = $request->get_json_params();
+    reiki_log_tx('webhook', array(
+        'gateway'    => 'asaas',
+        'status'     => $payload['event'] ?? '',
+        'payment_id' => $payload['payment']['id'] ?? '',
+        'amount'     => isset($payload['payment']['value']) ? floatval($payload['payment']['value']) : 0,
+    ));
 
     if ( isset($payload['event']) && in_array($payload['event'], array('PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED')) ) {
         $payment = $payload['payment'];
@@ -1459,6 +1473,11 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
     }
 
     $payload = json_decode($payload_raw, true);
+    reiki_log_tx('webhook', array(
+        'gateway'    => 'stripe',
+        'status'     => $payload['type'] ?? '',
+        'payment_id' => $payload['data']['object']['id'] ?? '',
+    ));
 
     if ( isset($payload['type']) && $payload['type'] === 'payment_intent.succeeded' ) {
         $payment_intent = $payload['data']['object'];
@@ -1576,6 +1595,13 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
 // =========================================================================
 function conceder_acesso_curso($wp_user_id, $produto_id, $metodo = 'Checkout', $valor_nzd = null, $valor_brl_override = null, $registrar_venda = true) {
     $produtos = get_reiki_products();
+    reiki_log_tx('acesso_liberado', array(
+        'gateway'    => $metodo,
+        'wp_user_id' => $wp_user_id,
+        'produto_id' => $produto_id,
+        'amount'     => $valor_brl_override ?: ($valor_nzd ?: 0),
+        'status'     => 'concedido',
+    ));
     if ( !function_exists('wc_memberships_create_user_membership') ) {
         error_log('ALERTA REIKI CHECKOUT: Plugin WooCommerce Memberships inativo! Não foi possível conceder acesso ao usuário ID ' . $wp_user_id);
         return;
@@ -2722,5 +2748,115 @@ function registrar_venda_externa_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array('sucesso' => true, 'post_id' => $post_id) );
+}
+
+// =========================================================================
+// LOG DE TRANSAÇÃO (T3.3) — rastreia o ciclo de vida do pagamento
+// =========================================================================
+if (!defined('REIKI_TX_LOG_DB_VERSION')) define('REIKI_TX_LOG_DB_VERSION', '1');
+
+// Cria/atualiza a tabela própria do log (uma vez; idempotente)
+add_action('init', function () {
+    if (get_option('reiki_tx_log_db') === REIKI_TX_LOG_DB_VERSION) return;
+    global $wpdb;
+    $table = $wpdb->prefix . 'reiki_tx_log';
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE $table (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        created_at DATETIME NOT NULL,
+        event VARCHAR(40) NOT NULL,
+        gateway VARCHAR(30) DEFAULT '',
+        payment_id VARCHAR(80) DEFAULT '',
+        wp_user_id BIGINT UNSIGNED DEFAULT 0,
+        email VARCHAR(190) DEFAULT '',
+        produto_id VARCHAR(60) DEFAULT '',
+        amount DECIMAL(12,2) DEFAULT 0,
+        status VARCHAR(60) DEFAULT '',
+        detail TEXT,
+        PRIMARY KEY (id),
+        KEY payment_id (payment_id),
+        KEY email (email),
+        KEY created_at (created_at)
+    ) $charset;";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+    update_option('reiki_tx_log_db', REIKI_TX_LOG_DB_VERSION);
+});
+
+// Insere um evento no log. Falha silenciosa (nunca quebra um pagamento por causa de log).
+function reiki_log_tx($event, $data = array()) {
+    global $wpdb;
+    try {
+        $wpdb->insert($wpdb->prefix . 'reiki_tx_log', array(
+            'created_at' => current_time('mysql'),
+            'event'      => substr((string)$event, 0, 40),
+            'gateway'    => substr((string)($data['gateway'] ?? ''), 0, 30),
+            'payment_id' => substr((string)($data['payment_id'] ?? ''), 0, 80),
+            'wp_user_id' => intval($data['wp_user_id'] ?? 0),
+            'email'      => substr((string)($data['email'] ?? ''), 0, 190),
+            'produto_id' => substr((string)($data['produto_id'] ?? ''), 0, 60),
+            'amount'     => floatval($data['amount'] ?? 0),
+            'status'     => substr((string)($data['status'] ?? ''), 0, 60),
+            'detail'     => substr((string)($data['detail'] ?? ''), 0, 2000),
+        ));
+    } catch (\Throwable $e) {
+        error_log('reiki_log_tx falhou: ' . $e->getMessage());
+    }
+}
+
+// Painel no wp-admin: Reiki TX (somente admin)
+add_action('admin_menu', function () {
+    add_menu_page('Reiki Transações', 'Reiki TX', 'manage_options', 'reiki-tx-log', 'reiki_tx_log_admin_page', 'dashicons-list-view', 56);
+});
+
+function reiki_tx_log_admin_page() {
+    if (!current_user_can('manage_options')) return;
+    global $wpdb;
+    $table = $wpdb->prefix . 'reiki_tx_log';
+    $q = isset($_GET['q']) ? sanitize_text_field(wp_unslash($_GET['q'])) : '';
+
+    if ($q !== '') {
+        $like = '%' . $wpdb->esc_like($q) . '%';
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $table WHERE payment_id LIKE %s OR email LIKE %s OR produto_id LIKE %s ORDER BY id DESC LIMIT 300",
+            $like, $like, $like
+        ));
+    } else {
+        $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY id DESC LIMIT 300");
+    }
+
+    echo '<div class="wrap"><h1>Reiki — Log de Transações</h1>';
+    echo '<p>Rastreie uma venda por <strong>payment_id</strong>, e-mail ou produto. Mostra os 300 mais recentes.</p>';
+    echo '<form method="get"><input type="hidden" name="page" value="reiki-tx-log">';
+    echo '<input type="search" name="q" value="' . esc_attr($q) . '" placeholder="payment_id, e-mail ou produto" style="width:320px;padding:6px;">';
+    echo ' <button class="button button-primary">Buscar</button>';
+    if ($q !== '') echo ' <a class="button" href="?page=reiki-tx-log">Limpar</a>';
+    echo '</form><br>';
+
+    if (empty($rows)) {
+        echo '<p><em>Nenhum registro' . ($q !== '' ? ' para "' . esc_html($q) . '"' : '') . '.</em></p></div>';
+        return;
+    }
+
+    $cor = array('acesso_liberado' => '#1a7f37', 'erro' => '#b32d2e', 'webhook' => '#1d4ed8');
+    echo '<table class="widefat striped"><thead><tr>';
+    echo '<th>Quando</th><th>Evento</th><th>Gateway</th><th>Payment ID</th><th>Usuário</th><th>E-mail</th><th>Produto</th><th>Valor</th><th>Status</th><th>Detalhe</th>';
+    echo '</tr></thead><tbody>';
+    foreach ($rows as $r) {
+        $c = isset($cor[$r->event]) ? $cor[$r->event] : '#555';
+        echo '<tr>';
+        echo '<td>' . esc_html($r->created_at) . '</td>';
+        echo '<td><strong style="color:' . esc_attr($c) . '">' . esc_html($r->event) . '</strong></td>';
+        echo '<td>' . esc_html($r->gateway) . '</td>';
+        echo '<td><code>' . esc_html($r->payment_id) . '</code></td>';
+        echo '<td>' . esc_html($r->wp_user_id ?: '') . '</td>';
+        echo '<td>' . esc_html($r->email) . '</td>';
+        echo '<td>' . esc_html($r->produto_id) . '</td>';
+        echo '<td>' . ($r->amount > 0 ? esc_html(number_format((float)$r->amount, 2, ',', '.')) : '') . '</td>';
+        echo '<td>' . esc_html($r->status) . '</td>';
+        echo '<td style="max-width:340px;font-size:11px;color:#666">' . esc_html($r->detail) . '</td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table></div>';
 }
 
