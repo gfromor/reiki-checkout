@@ -182,9 +182,11 @@ function CheckoutForm() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit_card');
   const [installments, setInstallments] = useState<number>(1);
   
-  const [nome, setNome] = useState(() => new URLSearchParams(window.location.search).get('name') || '');
-  const [email, setEmail] = useState(() => new URLSearchParams(window.location.search).get('email') || '');
-  const [telefone, setTelefone] = useState(() => new URLSearchParams(window.location.search).get('phone') || '');
+  // PII (nome/email/telefone) NÃO é mais lida da URL — o cliente preenche no próprio checkout.
+  // Evita vazar dado pessoal via Referer/logs/histórico (decisão de privacidade da V1).
+  const [nome, setNome] = useState('');
+  const [email, setEmail] = useState('');
+  const [telefone, setTelefone] = useState('');
   const [cpf, setCpf] = useState('');
   
   const [ccNumber, setCcNumber] = useState('');
