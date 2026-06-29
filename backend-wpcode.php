@@ -11,6 +11,93 @@ define('REIKI_ASAAS_WEBHOOK_TOKEN', ''); // Token removido
 define('ASAAS_IS_SANDBOX', false);
 
 // =========================================================================
+// AUTENTICAÇÃO ADMIN (PWA Dashboard / Link Builder)  [Fase 1 - Hardening]
+// =========================================================================
+// IMPORTANTE: defina os dois itens abaixo no wp-config.php, NUNCA neste snippet:
+//   define('REIKI_ADMIN_SECRET', '<32+ caracteres aleatorios>');
+//   define('REIKI_ADMIN_PIN_HASH', '<resultado de password_hash("SEU_PIN", PASSWORD_DEFAULT)>');
+// Enquanto não definir, há um fallback para não derrubar a produção.
+if (!defined('REIKI_ADMIN_SECRET'))     define('REIKI_ADMIN_SECRET', defined('AUTH_KEY') ? AUTH_KEY : 'TROCAR_NO_WP_CONFIG');
+if (!defined('REIKI_ADMIN_PIN_HASH'))   define('REIKI_ADMIN_PIN_HASH', ''); // vazio => usa o PIN legado p/ login
+if (!defined('REIKI_LEGACY_PIN'))       define('REIKI_LEGACY_PIN', '20192021NZ');
+// TRANSIÇÃO: deixe true até publicar o frontend novo (login por token). Depois mude para false.
+if (!defined('REIKI_ALLOW_LEGACY_PIN')) define('REIKI_ALLOW_LEGACY_PIN', true);
+
+// Rate limit por IP (usa CF-Connecting-IP atrás do Cloudflare). true = liberado.
+function reiki_admin_rate($scope, $max = 8, $janela = 900) {
+    $ip = isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? $_SERVER['HTTP_CF_CONNECTING_IP'] : ($_SERVER['REMOTE_ADDR'] ?? '0');
+    $k = 'reiki_rl_' . $scope . '_' . md5($ip);
+    $n = (int) get_transient($k);
+    if ($n >= $max) return false;
+    set_transient($k, $n + 1, $janela);
+    return true;
+}
+
+// CORS restrito para os endpoints administrativos (substitui o antigo "*")
+function reiki_admin_cors() {
+    $allowed = array('https://app.reikitimeacademy.com.br', 'http://localhost:5173');
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+    if (in_array($origin, $allowed)) header("Access-Control-Allow-Origin: " . $origin);
+    header("Vary: Origin");
+    header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type, Authorization, x-admin-token, x-dashboard-pin");
+}
+
+// Gera um token assinado (HMAC) com expiração. Padrão: 12h.
+function reiki_make_admin_token($ttl = 43200) {
+    $exp = time() + $ttl;
+    return $exp . '.' . hash_hmac('sha256', (string) $exp, REIKI_ADMIN_SECRET);
+}
+
+function reiki_valid_admin_token($token) {
+    if (!is_string($token) || strpos($token, '.') === false) return false;
+    list($exp, $sig) = explode('.', $token, 2);
+    if (!ctype_digit($exp) || intval($exp) < time()) return false;
+    return hash_equals(hash_hmac('sha256', $exp, REIKI_ADMIN_SECRET), $sig);
+}
+
+// Autoriza um request admin: token novo (header x-admin-token) OU PIN legado (transição).
+function reiki_is_admin( WP_REST_Request $request ) {
+    $token = $request->get_header('x-admin-token');
+    if ($token && reiki_valid_admin_token($token)) return true;
+
+    if (REIKI_ALLOW_LEGACY_PIN) {
+        $pin = $request->get_header('x-dashboard-pin');
+        if (!$pin) $pin = $request->get_param('pin');
+        if (!$pin) {
+            $p = $request->get_json_params();
+            if (is_array($p) && isset($p['pin'])) $pin = $p['pin'];
+        }
+        if ($pin && hash_equals(REIKI_LEGACY_PIN, (string) $pin)) return true;
+    }
+    return false;
+}
+
+// Endpoint de login: troca o PIN por um token assinado.
+function reiki_admin_login_api( WP_REST_Request $request ) {
+    reiki_admin_cors();
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) return rest_ensure_response( array('status' => 'ok') );
+
+    if (!reiki_admin_rate('admin_login', 8, 900)) {
+        return new WP_Error('rate_limit', 'Muitas tentativas. Aguarde 15 minutos.', array('status' => 429));
+    }
+
+    $params = $request->get_json_params();
+    $pin = isset($params['pin']) ? (string) $params['pin'] : '';
+
+    $ok = false;
+    if (REIKI_ADMIN_PIN_HASH !== '') {
+        $ok = password_verify($pin, REIKI_ADMIN_PIN_HASH);
+    } elseif (REIKI_ALLOW_LEGACY_PIN) {
+        $ok = hash_equals(REIKI_LEGACY_PIN, $pin); // fallback até configurar o hash no wp-config
+    }
+
+    if (!$ok) return new WP_Error('nao_autorizado', 'PIN incorreto', array('status' => 401));
+
+    return rest_ensure_response(array('token' => reiki_make_admin_token(), 'exp' => time() + 43200));
+}
+
+// =========================================================================
 // HELPER FUNÇÕES ASAAS (PAYMENTS, AUTH & CAPTURE)
 // =========================================================================
 function reiki_asaas_request($method, $endpoint, $body = null) {
@@ -232,6 +319,11 @@ function get_reiki_products() {
 // ROTAS DA API
 // =========================================================================
 add_action( 'rest_api_init', function () {
+    register_rest_route( 'reiki/v1', '/admin-login', array(
+        'methods' => 'POST, OPTIONS',
+        'callback' => 'reiki_admin_login_api',
+        'permission_callback' => '__return_true'
+    ) );
     register_rest_route( 'reiki/v1', '/checkout', array(
         'methods' => 'POST, OPTIONS',
         'callback' => 'processar_checkout_universal',
@@ -310,28 +402,16 @@ add_action( 'rest_api_init', function () {
 // ROTA DE CRIAÇÃO DE LINK CUSTOMIZADO (LINK BUILDER)
 // =========================================================================
 function processar_custom_link_criacao( WP_REST_Request $request ) {
-    $allowed_origins = array(
-        'https://app.reikitimeacademy.com.br',
-        'http://localhost:5173'
-    );
-    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
-    if (in_array($origin, $allowed_origins)) {
-        header("Access-Control-Allow-Origin: " . $origin);
-    }
-    header("Access-Control-Allow-Methods: POST, OPTIONS");
-    header("Access-Control-Allow-Headers: Content-Type, Authorization");
-
+    reiki_admin_cors();
     if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
-    $params = $request->get_json_params();
-    $pin = isset($params['pin']) ? sanitize_text_field($params['pin']) : '';
-    
-    // Validar PIN de Segurança
-    if ( $pin !== '20192021NZ' ) {
-        return new WP_Error( 'nao_autorizado', 'PIN Incorreto', array( 'status' => 401 ) );
+    if (!reiki_is_admin($request)) {
+        return new WP_Error( 'nao_autorizado', 'Acesso negado', array( 'status' => 401 ) );
     }
+
+    $params = $request->get_json_params();
 
     $nome = sanitize_text_field($params['nome_exibicao'] ?? $params['nome'] ?? '');
     $brl = floatval($params['preco_brl'] ?? $params['brl'] ?? 0);
@@ -425,24 +505,13 @@ function obter_custom_link_detalhes( WP_REST_Request $request ) {
 }
 
 function obter_lista_custom_links( WP_REST_Request $request ) {
-    $allowed_origins = array(
-        'https://app.reikitimeacademy.com.br',
-        'http://localhost:5173'
-    );
-    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
-    if (in_array($origin, $allowed_origins)) {
-        header("Access-Control-Allow-Origin: " . $origin);
-    }
-    header("Access-Control-Allow-Methods: GET, OPTIONS");
-    header("Access-Control-Allow-Headers: Content-Type, Authorization");
-
+    reiki_admin_cors();
     if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
-    $pin = $request->get_param('pin');
-    if ( $pin !== '20192021NZ' ) {
-        return new WP_Error( 'nao_autorizado', 'PIN Incorreto', array( 'status' => 401 ) );
+    if (!reiki_is_admin($request)) {
+        return new WP_Error( 'nao_autorizado', 'Acesso negado', array( 'status' => 401 ) );
     }
 
     $args = array(
@@ -1939,17 +2008,13 @@ function processar_lista_espera( WP_REST_Request $request ) {
 }
 
 function reiki_dashboard_api( WP_REST_Request $request ) {
-    header("Access-Control-Allow-Origin: *");
-    header("Access-Control-Allow-Methods: GET, OPTIONS");
-    header("Access-Control-Allow-Headers: Content-Type, Authorization, x-dashboard-pin");
-
+    reiki_admin_cors();
     if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
-    $pin = $request->get_header('x-dashboard-pin');
-    if ($pin !== '20192021NZ') {
-        return new WP_Error('nao_autorizado', 'PIN Incorreto', array('status' => 401));
+    if (!reiki_is_admin($request)) {
+        return new WP_Error('nao_autorizado', 'Acesso negado', array('status' => 401));
     }
 
     $args = array(
@@ -2053,17 +2118,13 @@ function reiki_dashboard_api( WP_REST_Request $request ) {
 }
 
 function reiki_dashboard_delete_lead_api( WP_REST_Request $request ) {
-    header("Access-Control-Allow-Origin: *");
-    header("Access-Control-Allow-Methods: POST, OPTIONS");
-    header("Access-Control-Allow-Headers: Content-Type, Authorization, x-dashboard-pin");
-
+    reiki_admin_cors();
     if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
-    $pin = $request->get_header('x-dashboard-pin');
-    if ($pin !== '20192021NZ') {
-        return new WP_Error('nao_autorizado', 'PIN Incorreto', array('status' => 401));
+    if (!reiki_is_admin($request)) {
+        return new WP_Error('nao_autorizado', 'Acesso negado', array('status' => 401));
     }
 
     $params = $request->get_json_params();
@@ -2119,9 +2180,12 @@ function reiki_dashboard_delete_lead_api( WP_REST_Request $request ) {
 // SCRIPT DE IMPORTAÇÃO (TEMPORÁRIO)
 // =========================================================================
 function reiki_import_junho_history( WP_REST_Request $request ) {
-    $pin = $request->get_param('pin');
-    if ($pin !== '20192021NZ') {
-        return new WP_Error('nao_autorizado', 'PIN Incorreto', array('status' => 401));
+    reiki_admin_cors();
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
+        return rest_ensure_response( array('status' => 'ok') );
+    }
+    if (!reiki_is_admin($request)) {
+        return new WP_Error('nao_autorizado', 'Acesso negado', array('status' => 401));
     }
 
     // Busca 100 últimos pagamentos do Asaas desde 01 de Junho
