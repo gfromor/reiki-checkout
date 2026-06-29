@@ -30,8 +30,10 @@ const StripeWrapper = forwardRef(({ clientSecret }: { clientSecret: string }, re
    );
 });
 
+// ATENÇÃO: deve ser IDÊNTICA ao $interest_rates do backend (backend-wpcode.php, reiki_asaas_montar_cartao).
+// Se mudar aqui, mude lá também — o valor cobrado tem que bater com o exibido.
 const INTEREST_RATES: Record<number, number> = {
-  1: 0, 
+  1: 0,
   2: 5.3, 
   3: 7.1, 
   4: 9.0, 

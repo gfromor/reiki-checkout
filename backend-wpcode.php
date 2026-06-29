@@ -118,7 +118,9 @@ function reiki_asaas_capturar($payment_id) {
 
 function reiki_asaas_montar_cartao($card_data, $valor_total, $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero) {
     $parcelas = intval($card_data['parcelas']);
-    $interest_rates = array(1 => 0, 2 => 7, 3 => 8, 4 => 9, 5 => 10, 6 => 11, 7 => 13, 8 => 14, 9 => 15, 10 => 16, 11 => 18, 12 => 20);
+    // ATENÇÃO: deve ser IDÊNTICA à INTEREST_RATES do frontend (reiki-checkout/src/App.tsx).
+    // Se mudar aqui, mude lá também — o valor cobrado tem que bater com o exibido.
+    $interest_rates = array(1 => 0, 2 => 5.3, 3 => 7.1, 4 => 9.0, 5 => 10.9, 6 => 12.8, 7 => 14.7, 8 => 16.7, 9 => 18.7, 10 => 20.2, 11 => 22.2, 12 => 24.1);
     $rate = isset($interest_rates[$parcelas]) ? $interest_rates[$parcelas] : 0;
     $valor_com_juros = $valor_total * (1 + $rate / 100);
     
