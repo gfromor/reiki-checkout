@@ -1,14 +1,19 @@
 <?php
 /**
- * REIKI TIME ACADEMY - CHECKOUT UNIVERSAL + WEBHOOKS
- * Este código deve ser colado no WPCode do site ead.reikitimeacademy.com.br
- * VERSÃO REAL EM PRODUÇÃO (chaves removidas por segurança)
+ * Plugin Name: Reiki Time — Checkout & Webhooks
+ * Description: Checkout universal (Asaas + Stripe), webhooks, memberships, dashboard e link builder.
+ * Version: 1.0.0
+ * Author: Reiki Time Academy
+ *
+ * INSTALAÇÃO: copiar este arquivo para wp-content/mu-plugins/reiki-backend.php
+ * SEGREDOS (chaves de API) ficam SEMPRE no wp-config.php, NUNCA neste arquivo.
+ * Passo a passo de migração: ver DEPLOY-FASE3-T3.1.md
  */
 
-// 1. Configurações Iniciais do ASAAS
-define('REIKI_ASAAS_API_KEY', ''); // Chave removida
-define('REIKI_ASAAS_WEBHOOK_TOKEN', ''); // Token removido
-define('ASAAS_IS_SANDBOX', false);
+// 1. Configurações Iniciais do ASAAS (valores reais ficam no wp-config.php)
+if (!defined('REIKI_ASAAS_API_KEY'))       define('REIKI_ASAAS_API_KEY', '');
+if (!defined('REIKI_ASAAS_WEBHOOK_TOKEN')) define('REIKI_ASAAS_WEBHOOK_TOKEN', '');
+if (!defined('ASAAS_IS_SANDBOX'))          define('ASAAS_IS_SANDBOX', false);
 
 // =========================================================================
 // AUTENTICAÇÃO ADMIN (PWA Dashboard / Link Builder)  [Fase 1 - Hardening]
@@ -223,14 +228,14 @@ function reiki_asaas_assinatura($customer_id, $valor, $max_payments, $vencimento
     return $body_resp;
 }
 
-// 2. Configurações Iniciais do STRIPE
-define('REIKI_STRIPE_SECRET_KEY', ''); // <--- Coloque sua Chave Secreta Live do Stripe aqui (sk_live_...)
-define('REIKI_STRIPE_WEBHOOK_SECRET', ''); // <--- Coloque o Signing Secret (whsec_...) aqui
-define('REIKI_TURNSTILE_SECRET_KEY', ''); // <--- AVISO: Coloque sua Chave Secreta do Cloudflare Turnstile aqui
+// 2. Configurações Iniciais do STRIPE (valores reais ficam no wp-config.php)
+if (!defined('REIKI_STRIPE_SECRET_KEY'))     define('REIKI_STRIPE_SECRET_KEY', '');
+if (!defined('REIKI_STRIPE_WEBHOOK_SECRET')) define('REIKI_STRIPE_WEBHOOK_SECRET', '');
+if (!defined('REIKI_TURNSTILE_SECRET_KEY'))  define('REIKI_TURNSTILE_SECRET_KEY', '');
 
-// 3. Configurações do OneSignal (App da Fê)
-define('REIKI_ONESIGNAL_APP_ID', '43777ff2-106a-48f6-9686-c6088c26f6ce'); // App ID (Público, OK ficar aqui)
-define('REIKI_ONESIGNAL_REST_KEY', ''); // <--- AVISO: Coloque sua Chave REST API do OneSignal aqui
+// 3. Configurações do OneSignal (App da Fê) — REST key fica no wp-config.php
+if (!defined('REIKI_ONESIGNAL_APP_ID'))  define('REIKI_ONESIGNAL_APP_ID', '43777ff2-106a-48f6-9686-c6088c26f6ce'); // público
+if (!defined('REIKI_ONESIGNAL_REST_KEY')) define('REIKI_ONESIGNAL_REST_KEY', '');
 
 // =========================================================================
 // REGISTRO DE CUSTOM POST TYPE (HISTÓRICO DE VENDAS)
