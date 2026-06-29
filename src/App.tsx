@@ -3,7 +3,12 @@ import { CreditCard, QrCode, Receipt, ShieldCheck, Lock, Globe, Loader2, CheckCi
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Turnstile } from '@marsidev/react-turnstile';
+import type { TurnstileInstance } from '@marsidev/react-turnstile';
 import { INTEREST_RATES, computeBasePrice, computeTotal } from './pricing';
+import type {
+  CheckoutPayload, CheckoutResponse, StripeIntentResponse, CouponResponse,
+  CustomLinkResponse, PaymentStatusResponse, ViaCepResponse, CatalogResponse, StripeHandle,
+} from './types';
 
 // Helper: fetch com timeout (AbortController) — evita travar em "Processando..." se um gateway engasgar.
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 25000): Promise<Response> {
@@ -165,7 +170,7 @@ function isValidLuhn(number: string) {
 // FORMULÁRIO PRINCIPAL DE CHECKOUT (Envolto pelo Stripe Elements)
 // ----------------------------------------------------------------------
 function CheckoutForm() {
-  const stripeRef = useRef<any>(null);
+  const stripeRef = useRef<StripeHandle | null>(null);
   const [clientSecret, setClientSecret] = useState('');
   const [paymentIntentId, setPaymentIntentId] = useState('');
 
@@ -202,7 +207,7 @@ function CheckoutForm() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const turnstileRef = useRef<any>(null);
+  const turnstileRef = useRef<TurnstileInstance | null>(null);
   const [agreedTerms, setAgreedTerms] = useState(true);
   const [agreedImmediateDelivery, setAgreedImmediateDelivery] = useState(true);
   
@@ -219,7 +224,7 @@ function CheckoutForm() {
     if (cleanCep.length === 8) {
       fetchWithTimeout(`https://viacep.com.br/ws/${cleanCep}/json/`, {}, 8000)
         .then(res => res.json())
-        .then(data => {
+        .then((data: ViaCepResponse) => {
           if (!data.erro) {
             setEndereco(`${data.logradouro}, ${data.bairro} - ${data.localidade}/${data.uf}`);
           }
@@ -251,16 +256,16 @@ function CheckoutForm() {
     if (productId.startsWith('custom_')) {
       fetchWithTimeout(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/custom-link?id=${productId}&t=${Date.now()}`, {}, 15000)
         .then(res => res.json())
-        .then(data => {
+        .then((data: CustomLinkResponse) => {
           if (data.sucesso) {
             setProduct({
-              title: data.title,
-              subtitle: data.subtitle,
-              brlPrice: data.brlPrice,
-              brlOriginal: data.brlPrice,
-              usdPrice: data.usdPrice,
-              eurPrice: data.eurPrice,
-              image: data.image,
+              title: data.title ?? '',
+              subtitle: data.subtitle ?? '',
+              brlPrice: data.brlPrice ?? 0,
+              brlOriginal: data.brlPrice ?? 0,
+              usdPrice: data.usdPrice ?? 0,
+              eurPrice: data.eurPrice ?? 0,
+              image: data.image ?? '',
               is_carne: data.is_carne,
               is_subscription: data.is_subscription,
               parcelas_carne: data.parcelas_carne
@@ -287,15 +292,16 @@ function CheckoutForm() {
     if (productId.startsWith('custom_')) return; // custom usa os preços do próprio link
     fetchWithTimeout('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/catalog', {}, 10000)
       .then(res => res.json())
-      .then(data => {
+      .then((data: CatalogResponse) => {
         if (data?.interest_rates) setInterestRates(prev => ({ ...prev, ...data.interest_rates }));
         if (data?.products?.[productId]) {
           const c = data.products[productId];
           setProduct(p => ({ ...p, brlPrice: c.preco_brl, usdPrice: c.preco_usd, eurPrice: c.preco_eur }));
         }
         if (data?.bumps) {
-          setBumps(prev => prev.map(b => data.bumps[b.id]
-            ? { ...b, brlPrice: data.bumps[b.id].brl, usdPrice: data.bumps[b.id].usd, eurPrice: data.bumps[b.id].eur }
+          const catBumps = data.bumps;
+          setBumps(prev => prev.map(b => catBumps[b.id]
+            ? { ...b, brlPrice: catBumps[b.id].brl, usdPrice: catBumps[b.id].usd, eurPrice: catBumps[b.id].eur }
             : b));
         }
       })
@@ -334,9 +340,9 @@ function CheckoutForm() {
       // Usa a URL de produção para a API (EAD, onde o snippet backend-wpcode.php mora)
       fetchWithTimeout(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/coupon?code=${couponCode}`, {}, 12000)
         .then(res => res.json())
-        .then(data => {
+        .then((data: CouponResponse) => {
           if (data.sucesso) {
-            setCouponDiscount({ type: data.tipo, amount: data.valor });
+            setCouponDiscount({ type: data.tipo ?? '', amount: data.valor ?? 0 });
           } else {
             console.warn("Cupom inválido:", data.message);
             setCouponCode(null);
@@ -364,10 +370,10 @@ function CheckoutForm() {
               cupom: couponCode || ''
             })
           });
-          const data = await res.json();
+          const data: StripeIntentResponse = await res.json();
           if (data.client_secret) {
             setClientSecret(data.client_secret);
-            setPaymentIntentId(data.payment_intent_id);
+            setPaymentIntentId(data.payment_intent_id ?? '');
           }
         } catch (e) {
           console.error("Erro ao gerar intent", e);
@@ -510,7 +516,7 @@ function CheckoutForm() {
     setIsLoading(true);
 
     // 1. Preparar o Payload
-    const payload: any = {
+    const payload: CheckoutPayload = {
       nome, email, telefone, cpf,
       produto: productId,
       valorTotal: total,
@@ -538,7 +544,12 @@ function CheckoutForm() {
         setIsLoading(false);
         return;
       }
-      
+      if (!stripe || !elements) {
+        setServerError('O sistema de cartão não carregou corretamente. Recarregue a página.');
+        setIsLoading(false);
+        return;
+      }
+
       payload.gateway = 'stripe_update';
       payload.payment_intent_id = paymentIntentId;
       
@@ -548,7 +559,7 @@ function CheckoutForm() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const wpData = await wpRes.json();
+        const wpData: CheckoutResponse = await wpRes.json();
         
         if (!wpRes.ok) {
           turnstileRef.current?.reset();
@@ -578,10 +589,10 @@ function CheckoutForm() {
         }
         
         setIsSuccess(true);
-      } catch (err: any) {
+      } catch (err) {
         turnstileRef.current?.reset();
         setTurnstileToken(null);
-        setServerError(err?.name === 'AbortError'
+        setServerError(err instanceof Error && err.name === 'AbortError'
           ? 'O servidor demorou a responder. Seu pagamento pode não ter sido processado — aguarde alguns instantes e verifique seu e-mail antes de tentar de novo.'
           : 'Falha de conexão com nossos servidores.');
       }
@@ -653,7 +664,7 @@ function CheckoutForm() {
         body: JSON.stringify(payload)
       });
 
-      const data = await response.json();
+      const data: CheckoutResponse = await response.json();
 
       if (!response.ok) {
         turnstileRef.current?.reset();
@@ -662,7 +673,7 @@ function CheckoutForm() {
       } else {
         setIsSuccess(true);
         if (data.pix_qrcode) {
-          setPixData({ qrcode: data.pix_qrcode, copia_cola: data.pix_copia_cola });
+          setPixData({ qrcode: data.pix_qrcode, copia_cola: data.pix_copia_cola ?? '' });
         }
         if (data.boleto_url) {
           setBoletoUrl(data.boleto_url);
@@ -671,10 +682,10 @@ function CheckoutForm() {
           setPaymentId(data.payment_id);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       turnstileRef.current?.reset();
       setTurnstileToken(null);
-      setServerError(err?.name === 'AbortError'
+      setServerError(err instanceof Error && err.name === 'AbortError'
         ? 'O servidor demorou a responder. Aguarde alguns instantes e verifique seu e-mail antes de tentar novamente.'
         : 'Falha de conexão com o servidor. Verifique sua internet.');
     } finally {
@@ -695,7 +706,7 @@ function CheckoutForm() {
           `https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/payment-status?payment_id=${encodeURIComponent(paymentId)}`,
           {}, 12000
         );
-        const data = await res.json();
+        const data: PaymentStatusResponse = await res.json();
         if (active && data?.paid) { setPaymentConfirmed(true); return; }
       } catch { /* ignora e tenta de novo */ }
       if (active) setTimeout(poll, 8000);
