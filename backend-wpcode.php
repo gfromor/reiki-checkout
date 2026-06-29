@@ -118,9 +118,7 @@ function reiki_asaas_capturar($payment_id) {
 
 function reiki_asaas_montar_cartao($card_data, $valor_total, $nome, $email, $cpf, $telefone, $ip_cliente, $cep, $numero) {
     $parcelas = intval($card_data['parcelas']);
-    // ATENÇÃO: deve ser IDÊNTICA à INTEREST_RATES do frontend (reiki-checkout/src/App.tsx).
-    // Se mudar aqui, mude lá também — o valor cobrado tem que bater com o exibido.
-    $interest_rates = array(1 => 0, 2 => 5.3, 3 => 7.1, 4 => 9.0, 5 => 10.9, 6 => 12.8, 7 => 14.7, 8 => 16.7, 9 => 18.7, 10 => 20.2, 11 => 22.2, 12 => 24.1);
+    $interest_rates = get_reiki_interest_rates(); // fonte única (o front consome a mesma via /catalog)
     $rate = isset($interest_rates[$parcelas]) ? $interest_rates[$parcelas] : 0;
     $valor_com_juros = $valor_total * (1 + $rate / 100);
     
@@ -288,7 +286,7 @@ function get_reiki_products() {
         ),
         'reiki-florescer' => array(
             'nome' => 'Reiki Florescer',
-            'membership_id' => 0000,
+            'membership_id' => 12226,
             'preco_brl' => 297.00,
             'preco_usd' => 60.00,
             'preco_eur' => 55.00
@@ -306,15 +304,62 @@ function get_reiki_products() {
             'preco_brl' => 29.90,
             'preco_usd' => 6.00,
             'preco_eur' => 6.00
-        ),
-        'reiki-florescer' => array(
-            'nome' => 'Reiki Florescer',
-            'membership_id' => 12226, 
-            'preco_brl' => 297.00,
-            'preco_usd' => 60.00,
-            'preco_eur' => 55.00
         )
     );
+}
+
+// =========================================================================
+// FONTE ÚNICA: juros e order bumps (consumidos pelo checkout via /catalog)
+// =========================================================================
+function get_reiki_interest_rates() {
+    // Tabela OFICIAL de juros do parcelamento (cartão BRL). Única no backend.
+    return array(1 => 0, 2 => 5.3, 3 => 7.1, 4 => 9.0, 5 => 10.9, 6 => 12.8, 7 => 14.7, 8 => 16.7, 9 => 18.7, 10 => 20.2, 11 => 22.2, 12 => 24.1);
+}
+
+function get_reiki_bumps() {
+    return array(
+        '12224_ext' => array('nome' => '+6 Meses', 'brl' => 19.90, 'usd' => 5.00, 'eur' => 5.00),
+        '13031'     => array('nome' => 'Desafio Infinity', 'brl' => 47.00, 'usd' => 10.00, 'eur' => 10.00),
+        '12895'     => array('nome' => 'Deusa AI PRO', 'brl' => 29.90, 'usd' => 6.00, 'eur' => 6.00)
+    );
+}
+
+// =========================================================================
+// ROTA /catalog — fonte única de preços/juros/bumps para os frontends
+// =========================================================================
+function reiki_catalog_api( WP_REST_Request $request ) {
+    $allowed = array(
+        'https://checkout.reikitimeacademy.com.br',
+        'https://reiki-checkout.pages.dev',
+        'https://app.reikitimeacademy.com.br',
+        'http://localhost:5173',
+        'http://localhost:3000'
+    );
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+    if (in_array($origin, $allowed)) header("Access-Control-Allow-Origin: " . $origin);
+    header("Vary: Origin");
+    header("Access-Control-Allow-Methods: GET, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type");
+    header("Cache-Control: public, max-age=120"); // preços mudam raramente
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) return rest_ensure_response( array('status' => 'ok') );
+
+    // Só expõe o que o frontend precisa (sem membership_id interno)
+    $produtos = get_reiki_products();
+    $out = array();
+    foreach ($produtos as $id => $p) {
+        $out[$id] = array(
+            'nome'      => $p['nome'],
+            'preco_brl' => floatval($p['preco_brl']),
+            'preco_usd' => floatval($p['preco_usd']),
+            'preco_eur' => floatval($p['preco_eur'])
+        );
+    }
+
+    return rest_ensure_response( array(
+        'products'       => $out,
+        'interest_rates' => get_reiki_interest_rates(),
+        'bumps'          => get_reiki_bumps()
+    ) );
 }
 
 // =========================================================================
@@ -349,6 +394,11 @@ add_action( 'rest_api_init', function () {
     register_rest_route( 'reiki/v1', '/coupon', array(
         'methods' => 'GET, OPTIONS',
         'callback' => 'validar_cupom_woocommerce',
+        'permission_callback' => '__return_true'
+    ) );
+    register_rest_route( 'reiki/v1', '/catalog', array(
+        'methods' => 'GET, OPTIONS',
+        'callback' => 'reiki_catalog_api',
         'permission_callback' => '__return_true'
     ) );
     register_rest_route( 'reiki/v1', '/lead', array(
@@ -743,11 +793,7 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
     $bumps_selecionados = isset($params['bumps']) && is_array($params['bumps']) ? array_map('sanitize_text_field', $params['bumps']) : array();
     
     // Configuração dos Bumps
-    $bumps_config = array(
-        '12224_ext' => array('nome' => '+6 Meses', 'brl' => 19.90, 'usd' => 5.00, 'eur' => 5.00),
-        '13031'     => array('nome' => 'Desafio Infinity', 'brl' => 47.00, 'usd' => 10.00, 'eur' => 10.00),
-        '12895'     => array('nome' => 'Deusa AI PRO', 'brl' => 29.90, 'usd' => 6.00, 'eur' => 6.00)
-    );
+    $bumps_config = get_reiki_bumps();
 
     $nomes_comprados = array();
 
@@ -2497,11 +2543,7 @@ function processar_stripe_intent_criacao( WP_REST_Request $request ) {
 
     $valor_total = ($currency === 'eur') ? $produto_info['preco_eur'] : $produto_info['preco_usd'];
 
-    $bumps_config = array(
-        '12224_ext' => array('nome' => '+6 Meses', 'brl' => 19.90, 'usd' => 5.00, 'eur' => 5.00),
-        '13031'     => array('nome' => 'Desafio Infinity', 'brl' => 47.00, 'usd' => 10.00, 'eur' => 10.00),
-        '12895'     => array('nome' => 'Deusa AI PRO', 'brl' => 29.90, 'usd' => 6.00, 'eur' => 6.00)
-    );
+    $bumps_config = get_reiki_bumps();
 
     foreach ($bumps_selecionados as $bump_id) {
         if (isset($bumps_config[$bump_id])) {

@@ -255,7 +255,10 @@ function CheckoutForm() {
   const productId = searchParams.get('produto') || 'cuidar';
   
   const [product, setProduct] = useState(() => PRODUCTS[productId] || PRODUCTS['cuidar']);
-  
+  // T3.2: juros e bumps começam nos hardcoded (fallback) e são sobrescritos pelo /catalog.
+  const [interestRates, setInterestRates] = useState<Record<number, number>>(INTEREST_RATES);
+  const [bumps, setBumps] = useState(ORDER_BUMPS);
+
   useEffect(() => {
     if (productId.startsWith('custom_')) {
       fetchWithTimeout(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/custom-link?id=${productId}&t=${Date.now()}`, {}, 15000)
@@ -289,6 +292,26 @@ function CheckoutForm() {
           window.location.href = 'https://ajuda.reikitimeacademy.com.br';
         });
     }
+  }, [productId]);
+
+  // T3.2: /catalog é a fonte única de preços/juros/bumps. Fallback aos hardcoded se falhar.
+  useEffect(() => {
+    if (productId.startsWith('custom_')) return; // custom usa os preços do próprio link
+    fetchWithTimeout('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/catalog', {}, 10000)
+      .then(res => res.json())
+      .then(data => {
+        if (data?.interest_rates) setInterestRates(prev => ({ ...prev, ...data.interest_rates }));
+        if (data?.products?.[productId]) {
+          const c = data.products[productId];
+          setProduct(p => ({ ...p, brlPrice: c.preco_brl, usdPrice: c.preco_usd, eurPrice: c.preco_eur }));
+        }
+        if (data?.bumps) {
+          setBumps(prev => prev.map(b => data.bumps[b.id]
+            ? { ...b, brlPrice: data.bumps[b.id].brl, usdPrice: data.bumps[b.id].usd, eurPrice: data.bumps[b.id].eur }
+            : b));
+        }
+      })
+      .catch(() => {}); // mantém os hardcoded
   }, [productId]);
 
   // Ensure current currency is valid for the product
@@ -413,7 +436,7 @@ function CheckoutForm() {
     let price = productPrice;
     if (productId === 'infinity') {
       selectedBumps.forEach(bumpId => {
-        const bump = ORDER_BUMPS.find(b => b.id === bumpId);
+        const bump = bumps.find(b => b.id === bumpId);
         if (bump) {
           if (currency === 'USD') price += bump.usdPrice;
           else if (currency === 'EUR') price += bump.eurPrice;
@@ -438,18 +461,18 @@ function CheckoutForm() {
   const calculateTotal = () => {
     if (currency === 'BRL') {
       if (paymentMethod === 'credit_card') {
-        const rate = INTEREST_RATES[installments] || 0;
+        const rate = interestRates[installments] || 0;
         return basePrice * (1 + rate / 100);
       } else if (paymentMethod === 'two_cards') {
         const val1 = Number(card1EntryValue) || 0;
         const val2 = Math.max(0, basePrice - val1);
-        const rate1 = INTEREST_RATES[installments] || 0;
-        const rate2 = INTEREST_RATES[installments2] || 0;
+        const rate1 = interestRates[installments] || 0;
+        const rate2 = interestRates[installments2] || 0;
         return (val1 * (1 + rate1 / 100)) + (val2 * (1 + rate2 / 100));
       } else if (paymentMethod === 'pix_and_card') {
         const pixVal = Number(pixEntryValue) || 0;
         const cardVal = Math.max(0, basePrice - pixVal);
-        const rate = INTEREST_RATES[installments] || 0;
+        const rate = interestRates[installments] || 0;
         return pixVal + (cardVal * (1 + rate / 100));
       } else if (paymentMethod === 'pix_and_boleto') {
         // Sem juros para boleto à vista
@@ -971,7 +994,7 @@ function CheckoutForm() {
                     ) : (
                       <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
                         {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
-                          const rate = INTEREST_RATES[num] || 0;
+                          const rate = interestRates[num] || 0;
                           let valToInstallment = basePrice;
                           if (paymentMethod === 'two_cards') valToInstallment = Number(card1EntryValue) || 0;
                           if (paymentMethod === 'pix_and_card') valToInstallment = Math.max(0, basePrice - (Number(pixEntryValue) || 0));
@@ -1020,7 +1043,7 @@ function CheckoutForm() {
                       <label className="block text-sm font-medium text-stone-600 mb-1">Parcelamento (2º Cartão)</label>
                       <select value={installments2} onChange={(e) => setInstallments2(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
                         {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
-                          const rate = INTEREST_RATES[num] || 0;
+                          const rate = interestRates[num] || 0;
                           const valToInstallment = Math.max(0, basePrice - (Number(card1EntryValue) || 0));
                           const instTotal = valToInstallment * (1 + rate / 100);
                           const instValue = instTotal / num;
@@ -1131,7 +1154,7 @@ function CheckoutForm() {
             {productId === 'infinity' && (
               <div className="space-y-4 mb-6">
                 <div className="text-sm font-bold text-stone-800 border-b pb-2">Complete seu pedido:</div>
-                {ORDER_BUMPS.map(bump => {
+                {bumps.map(bump => {
                   const isSelected = selectedBumps.includes(bump.id);
                   return (
                     <div 
