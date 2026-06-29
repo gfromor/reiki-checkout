@@ -3,6 +3,7 @@ import { CreditCard, QrCode, Receipt, ShieldCheck, Lock, Globe, Loader2, CheckCi
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Turnstile } from '@marsidev/react-turnstile';
+import { INTEREST_RATES, computeBasePrice, computeTotal } from './pricing';
 
 // Helper: fetch com timeout (AbortController) — evita travar em "Processando..." se um gateway engasgar.
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 25000): Promise<Response> {
@@ -41,22 +42,7 @@ const StripeWrapper = forwardRef(({ clientSecret }: { clientSecret: string }, re
    );
 });
 
-// ATENÇÃO: deve ser IDÊNTICA ao $interest_rates do backend (backend-wpcode.php, reiki_asaas_montar_cartao).
-// Se mudar aqui, mude lá também — o valor cobrado tem que bater com o exibido.
-const INTEREST_RATES: Record<number, number> = {
-  1: 0,
-  2: 5.3, 
-  3: 7.1, 
-  4: 9.0, 
-  5: 10.9, 
-  6: 12.8,
-  7: 14.7, 
-  8: 16.7, 
-  9: 18.7, 
-  10: 20.2, 
-  11: 22.2, 
-  12: 24.1
-};
+// INTEREST_RATES, computeBasePrice e computeTotal agora vêm de ./pricing (fonte única + testada).
 
 const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number, image: string, is_carne?: boolean, parcelas_carne?: number, is_subscription?: boolean }> = {
   'guardias': { 
@@ -432,57 +418,25 @@ function CheckoutForm() {
   
   const productPrice = getProductPrice();
   
-  const basePrice = (() => {
-    let price = productPrice;
-    if (productId === 'infinity') {
-      selectedBumps.forEach(bumpId => {
-        const bump = bumps.find(b => b.id === bumpId);
-        if (bump) {
-          if (currency === 'USD') price += bump.usdPrice;
-          else if (currency === 'EUR') price += bump.eurPrice;
-          else price += bump.brlPrice;
-        }
-      });
-    }
-    
-    if (couponDiscount) {
-       if (couponDiscount.type === 'percent') {
-          price = price - (price * (couponDiscount.amount / 100));
-       } else if (currency === 'BRL') {
-          // fixed discounts
-          price = price - couponDiscount.amount;
-       }
-       if (price < 0) price = 0;
-    }
-    
-    return price;
-  })();
+  const basePrice = computeBasePrice({
+    productPrice,
+    productId,
+    currency,
+    bumps,
+    selectedBumps,
+    couponDiscount,
+  });
 
-  const calculateTotal = () => {
-    if (currency === 'BRL') {
-      if (paymentMethod === 'credit_card') {
-        const rate = interestRates[installments] || 0;
-        return basePrice * (1 + rate / 100);
-      } else if (paymentMethod === 'two_cards') {
-        const val1 = Number(card1EntryValue) || 0;
-        const val2 = Math.max(0, basePrice - val1);
-        const rate1 = interestRates[installments] || 0;
-        const rate2 = interestRates[installments2] || 0;
-        return (val1 * (1 + rate1 / 100)) + (val2 * (1 + rate2 / 100));
-      } else if (paymentMethod === 'pix_and_card') {
-        const pixVal = Number(pixEntryValue) || 0;
-        const cardVal = Math.max(0, basePrice - pixVal);
-        const rate = interestRates[installments] || 0;
-        return pixVal + (cardVal * (1 + rate / 100));
-      } else if (paymentMethod === 'pix_and_boleto') {
-        // Sem juros para boleto à vista
-        return basePrice;
-      }
-    }
-    return basePrice;
-  };
-
-  const total = calculateTotal();
+  const total = computeTotal({
+    basePrice,
+    currency,
+    paymentMethod,
+    installments,
+    installments2,
+    rates: interestRates,
+    card1EntryValue: Number(card1EntryValue) || 0,
+    pixEntryValue: Number(pixEntryValue) || 0,
+  });
   const installmentValue = currency === 'BRL' ? total / installments : total;
 
   const handleCheckout = async (e: React.FormEvent) => {
