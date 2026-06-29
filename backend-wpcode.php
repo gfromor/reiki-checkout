@@ -8,13 +8,9 @@
  * INSTALAÇÃO: copiar este arquivo para wp-content/mu-plugins/reiki-backend.php
  * SEGREDOS (chaves de API) ficam SEMPRE no wp-config.php, NUNCA neste arquivo.
  * Passo a passo de migração: ver DEPLOY-FASE3-T3.1.md
+ * IMPORTANTE: nunca deixe este plugin E o snippet WPCode ativos ao mesmo tempo
+ * (declaram as mesmas funções -> "Cannot redeclare function"). Desative o WPCode antes.
  */
-
-// SALVAGUARDA: se as funções já foram declaradas (ex.: snippet WPCode ainda ativo/cacheado),
-// aborta o carregamento deste arquivo para evitar fatal "Cannot redeclare function".
-if (function_exists('processar_checkout_universal')) {
-    return;
-}
 
 // 1. Configurações Iniciais do ASAAS (valores reais ficam no wp-config.php)
 if (!defined('REIKI_ASAAS_API_KEY'))       define('REIKI_ASAAS_API_KEY', '');
