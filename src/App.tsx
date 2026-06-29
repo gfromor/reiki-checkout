@@ -31,11 +31,21 @@ const StripeWrapper = forwardRef(({ clientSecret }: { clientSecret: string }, re
 });
 
 const INTEREST_RATES: Record<number, number> = {
-  1: 0, 2: 7, 3: 8, 4: 9, 5: 10, 6: 11,
-  7: 13, 8: 14, 9: 15, 10: 16, 11: 18, 12: 20
+  1: 0, 
+  2: 5.3, 
+  3: 7.1, 
+  4: 9.0, 
+  5: 10.9, 
+  6: 12.8,
+  7: 14.7, 
+  8: 16.7, 
+  9: 18.7, 
+  10: 20.2, 
+  11: 22.2, 
+  12: 24.1
 };
 
-const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number, image: string }> = {
+const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: number, brlOriginal: number, usdPrice: number, eurPrice: number, image: string, is_carne?: boolean, parcelas_carne?: number, is_subscription?: boolean }> = {
   'guardias': { 
     title: 'Formação Guardiãs do Clã', 
     subtitle: 'Turma Fundadora', 
@@ -48,8 +58,8 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
   'cuidar': { 
     title: 'Formação Método CUIDAR', 
     subtitle: 'Acesso completo + Bônus exclusivos',
-    brlPrice: 647.00, brlOriginal: 997.00,
-    usdPrice: 129.00, eurPrice: 119.00,
+    brlPrice: 697.00, brlOriginal: 997.00,
+    usdPrice: 145.00, eurPrice: 125.00,
     image: '/curso-cuidar.png'
   },
   'cer': {
@@ -116,7 +126,7 @@ const ORDER_BUMPS = [
   }
 ];
 
-type PaymentMethod = 'credit_card' | 'pix' | 'boleto' | 'two_cards' | 'pix_and_card' | 'pix_and_boleto';
+type PaymentMethod = 'credit_card' | 'pix' | 'boleto' | 'two_cards' | 'pix_and_card' | 'pix_and_boleto' | 'boleto_parcelado';
 type Currency = 'BRL' | 'USD' | 'EUR';
 
 function isValidCPF(cpf: string) {
@@ -160,7 +170,11 @@ function CheckoutForm() {
   const [clientSecret, setClientSecret] = useState('');
   const [paymentIntentId, setPaymentIntentId] = useState('');
 
-  const [currency, setCurrency] = useState<Currency>('BRL');
+  const [currency, setCurrency] = useState<Currency>(() => {
+    const urlCurrency = new URLSearchParams(window.location.search).get('currency') as Currency;
+    if (urlCurrency && ['BRL', 'USD', 'EUR'].includes(urlCurrency)) return urlCurrency;
+    return 'BRL';
+  });
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit_card');
   const [installments, setInstallments] = useState<number>(1);
   
@@ -226,7 +240,57 @@ function CheckoutForm() {
 
   const searchParams = new URLSearchParams(window.location.search);
   const productId = searchParams.get('produto') || 'cuidar';
-  const product = PRODUCTS[productId] || PRODUCTS['cuidar'];
+  
+  const [product, setProduct] = useState(() => PRODUCTS[productId] || PRODUCTS['cuidar']);
+  
+  useEffect(() => {
+    if (productId.startsWith('custom_')) {
+      fetch(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/custom-link?id=${productId}&t=${Date.now()}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.sucesso) {
+            setProduct({
+              title: data.title,
+              subtitle: data.subtitle,
+              brlPrice: data.brlPrice,
+              brlOriginal: data.brlPrice,
+              usdPrice: data.usdPrice,
+              eurPrice: data.eurPrice,
+              image: data.image,
+              is_carne: data.is_carne,
+              is_subscription: data.is_subscription,
+              parcelas_carne: data.parcelas_carne
+            });
+            if (data.is_carne) {
+              setCurrency('BRL');
+              setPaymentMethod('boleto_parcelado' as PaymentMethod);
+            } else if (data.is_subscription) {
+              setPaymentMethod('credit_card' as PaymentMethod);
+            }
+          } else {
+            window.location.href = 'https://ajuda.reikitimeacademy.com.br';
+          }
+        })
+        .catch(err => {
+          console.error("Falha ao carregar link customizado", err);
+          window.location.href = 'https://ajuda.reikitimeacademy.com.br';
+        });
+    }
+  }, [productId]);
+
+  // Ensure current currency is valid for the product
+  useEffect(() => {
+    if (currency === 'BRL' && product.brlPrice <= 0) {
+      if (product.usdPrice > 0) setCurrency('USD');
+      else if (product.eurPrice > 0) setCurrency('EUR');
+    } else if (currency === 'USD' && product.usdPrice <= 0) {
+      if (product.brlPrice > 0) setCurrency('BRL');
+      else if (product.eurPrice > 0) setCurrency('EUR');
+    } else if (currency === 'EUR' && product.eurPrice <= 0) {
+      if (product.brlPrice > 0) setCurrency('BRL');
+      else if (product.usdPrice > 0) setCurrency('USD');
+    }
+  }, [product, currency]);
 
   const getImmediateDeliveryText = () => {
     if (productId === 'cuidar') {
@@ -461,6 +525,7 @@ function CheckoutForm() {
       gateway: currency === 'BRL' ? 'asaas' : 'stripe',
       currency: currency,
       parcelas: installments,
+      parcelas_carne: product.is_carne ? product.parcelas_carne : undefined,
       metodo: paymentMethod,
       bumps: selectedBumps,
       turnstileToken: turnstileToken,
@@ -581,6 +646,9 @@ function CheckoutForm() {
         payload.pix_value = pixVal;
         payload.cep = cep.replace(/\D/g, '');
         payload.numero = numero;
+    } else if (paymentMethod === 'boleto' || paymentMethod === 'boleto_parcelado') {
+        payload.cep = cep.replace(/\D/g, '');
+        payload.numero = numero;
     }
 
     // 4. Enviar para o WordPress (EAD)
@@ -663,15 +731,21 @@ function CheckoutForm() {
         <div className="font-bold text-xl tracking-tight text-emerald-800">Reiki Time Academy</div>
         
         <div className="flex bg-stone-100 p-1 rounded-lg border border-stone-200">
-          <button type="button" onClick={() => { setCurrency('BRL'); setPaymentMethod('credit_card'); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currency === 'BRL' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
-            🇧🇷 BRL
-          </button>
-          <button type="button" onClick={() => { setCurrency('USD'); setPaymentMethod('credit_card'); setInstallments(1); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currency === 'USD' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
-            🇺🇸 USD
-          </button>
-          <button type="button" onClick={() => { setCurrency('EUR'); setPaymentMethod('credit_card'); setInstallments(1); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currency === 'EUR' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
-            🇪🇺 EUR
-          </button>
+          {product.brlPrice > 0 && (
+            <button type="button" onClick={() => { setCurrency('BRL'); setPaymentMethod('credit_card'); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currency === 'BRL' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
+              🇧🇷 BRL
+            </button>
+          )}
+          {product.usdPrice > 0 && (
+            <button type="button" onClick={() => { setCurrency('USD'); setPaymentMethod('credit_card'); setInstallments(1); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currency === 'USD' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
+              🇺🇸 USD
+            </button>
+          )}
+          {product.eurPrice > 0 && (
+            <button type="button" onClick={() => { setCurrency('EUR'); setPaymentMethod('credit_card'); setInstallments(1); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currency === 'EUR' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
+              🇪🇺 EUR
+            </button>
+          )}
         </div>
       </header>
 
@@ -730,7 +804,7 @@ function CheckoutForm() {
                 </div>
               )}
 
-              {currency === 'BRL' && ['credit_card', 'two_cards', 'pix_and_card'].includes(paymentMethod) && (
+              {currency === 'BRL' && ['credit_card', 'two_cards', 'pix_and_card', 'boleto_parcelado'].includes(paymentMethod) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="block text-sm font-medium text-stone-700 mb-1">CEP *</label>
@@ -767,7 +841,7 @@ function CheckoutForm() {
               Pagamento {currency !== 'BRL' && <span className="ml-2 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full font-bold">Via Stripe</span>}
             </h2>
             
-            {currency === 'BRL' && (
+            {currency === 'BRL' && !product.is_carne && !product.is_subscription && (
               <div className="grid grid-cols-2 md:grid-cols-6 gap-2 md:gap-2 mb-6">
                 <button type="button" onClick={() => { setPaymentMethod('credit_card'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'credit_card' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
                   <CreditCard className="w-5 h-5" />
@@ -792,6 +866,16 @@ function CheckoutForm() {
                 <button type="button" onClick={() => { setPaymentMethod('pix_and_boleto'); setInstallments(1); }} className={`p-2 border rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'pix_and_boleto' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500' : 'border-stone-200 hover:border-stone-300 text-stone-500'}`}>
                   <div className="flex -space-x-1"><QrCode className="w-5 h-5" /><Receipt className="w-5 h-5 opacity-50" /></div>
                   <span className="text-[10px] md:text-xs font-medium text-center leading-tight">Pix + Boleto</span>
+                </button>
+              </div>
+            )}
+            
+            {currency === 'BRL' && product.is_carne && (
+              <div className="grid grid-cols-1 mb-6">
+                <button type="button" className={`p-4 border rounded-xl flex flex-col items-center justify-center gap-2 transition-all border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500`}>
+                  <Receipt className="w-8 h-8" />
+                  <span className="font-bold text-lg text-center">Carnê Inteligente</span>
+                  <span className="text-sm font-medium text-center text-emerald-600">{product.parcelas_carne}x no boleto</span>
                 </button>
               </div>
             )}
@@ -863,22 +947,28 @@ function CheckoutForm() {
                   
                   <div>
                     <label className="block text-sm font-medium text-stone-600 mb-1">Parcelamento</label>
-                    <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
-                      {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
-                        const rate = INTEREST_RATES[num] || 0;
-                        let valToInstallment = basePrice;
-                        if (paymentMethod === 'two_cards') valToInstallment = Number(card1EntryValue) || 0;
-                        if (paymentMethod === 'pix_and_card') valToInstallment = Math.max(0, basePrice - (Number(pixEntryValue) || 0));
-                        
-                        const instTotal = valToInstallment * (1 + rate / 100);
-                        const instValue = instTotal / num;
-                        return (
-                          <option key={num} value={num}>
-                            {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} {num === 1 ? 'sem juros' : ''}
-                          </option>
-                        )
-                      })}
-                    </select>
+                    {product.is_subscription ? (
+                      <div className="w-full border border-stone-300 rounded-lg p-3 bg-stone-50 text-stone-700">
+                        Pagamento mensal automático
+                      </div>
+                    ) : (
+                      <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} className="w-full border border-stone-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
+                        {[1,2,3,4,5,6,7,8,9,10,11,12].map(num => {
+                          const rate = INTEREST_RATES[num] || 0;
+                          let valToInstallment = basePrice;
+                          if (paymentMethod === 'two_cards') valToInstallment = Number(card1EntryValue) || 0;
+                          if (paymentMethod === 'pix_and_card') valToInstallment = Math.max(0, basePrice - (Number(pixEntryValue) || 0));
+                          
+                          const instTotal = valToInstallment * (1 + rate / 100);
+                          const instValue = instTotal / num;
+                          return (
+                            <option key={num} value={num}>
+                              {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </option>
+                          )
+                        })}
+                      </select>
+                    )}
                   </div>
                   </div>
                 )}
@@ -919,7 +1009,7 @@ function CheckoutForm() {
                           const instValue = instTotal / num;
                           return (
                             <option key={num} value={num}>
-                              {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} {num === 1 ? 'sem juros' : ''}
+                              {num}x de {instValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </option>
                           )
                         })}
@@ -943,6 +1033,14 @@ function CheckoutForm() {
                 <Receipt className="w-12 h-12 text-stone-400 mx-auto mb-3" />
                 <h3 className="font-bold text-stone-700 mb-2">Boleto Bancário à vista</h3>
                 <p className="text-stone-500 text-sm">A compensação pode levar até 2 dias úteis para liberação do seu acesso.</p>
+              </div>
+            )}
+
+            {currency === 'BRL' && paymentMethod === 'boleto_parcelado' && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center animate-in fade-in">
+                <Receipt className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+                <h3 className="font-bold text-emerald-900 mb-2">Carnê Inteligente ({product.parcelas_carne}x)</h3>
+                <p className="text-emerald-700 text-sm">Você pagará a primeira parcela hoje e receberá o acesso imediatamente após a compensação. As demais parcelas serão enviadas mensalmente.</p>
               </div>
             )}
 
@@ -980,11 +1078,19 @@ function CheckoutForm() {
 
             <div className="space-y-3 mb-6">
               <div className="flex justify-between text-sm text-stone-600">
-                <span>Valor com desconto</span>
+                <span>{product.is_subscription && (product.parcelas_carne || 1) > 1 ? `Plano de ${product.parcelas_carne} meses` : 'Valor com desconto'}</span>
                 <span className={couponDiscount ? 'line-through text-stone-400' : ''}>
-                  {currency === 'BRL' && productPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  {currency === 'USD' && productPrice.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                  {currency === 'EUR' && productPrice.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                  {product.is_subscription && (product.parcelas_carne || 1) > 1 ? (
+                    <>
+                      {product.parcelas_carne}x de {currency === 'BRL' ? (productPrice/(product.parcelas_carne||1)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : currency === 'USD' ? (productPrice/(product.parcelas_carne||1)).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : (productPrice/(product.parcelas_carne||1)).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })} / mês
+                    </>
+                  ) : (
+                    <>
+                      {currency === 'BRL' && productPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {currency === 'USD' && productPrice.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                      {currency === 'EUR' && productPrice.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                    </>
+                  )}
                 </span>
               </div>
               {couponDiscount && couponCode && (
@@ -1078,12 +1184,25 @@ function CheckoutForm() {
               <div className="flex justify-between items-end">
                 <span className="font-medium text-stone-600">Total</span>
                 <div className="text-right">
-                  <span className="block text-2xl font-bold text-stone-800">
-                    {currency === 'BRL' && total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    {currency === 'USD' && total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                    {currency === 'EUR' && total.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                  <span className="block text-2xl font-bold text-stone-800 flex flex-col items-end gap-1">
+                    {product.is_subscription && (product.parcelas_carne || 1) > 1 ? (
+                      <>
+                        <span className="text-xl">
+                          {product.parcelas_carne}x de {currency === 'BRL' ? (total/(product.parcelas_carne||1)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : currency === 'USD' ? (total/(product.parcelas_carne||1)).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : (total/(product.parcelas_carne||1)).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })} / mês
+                        </span>
+                        <span className="text-sm font-normal text-stone-500">
+                          Total: {currency === 'BRL' ? total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : currency === 'USD' ? total.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : total.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        {currency === 'BRL' && total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        {currency === 'USD' && total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                        {currency === 'EUR' && total.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                      </>
+                    )}
                   </span>
-                  {currency === 'BRL' && paymentMethod === 'credit_card' && installments > 1 && (
+                  {currency === 'BRL' && paymentMethod === 'credit_card' && installments > 1 && !product.is_subscription && (
                     <span className="text-sm text-emerald-600 font-medium">
                       ou {installments}x de {installmentValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </span>
