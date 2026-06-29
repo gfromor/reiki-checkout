@@ -10,6 +10,12 @@
  * Passo a passo de migração: ver DEPLOY-FASE3-T3.1.md
  */
 
+// SALVAGUARDA: se as funções já foram declaradas (ex.: snippet WPCode ainda ativo/cacheado),
+// aborta o carregamento deste arquivo para evitar fatal "Cannot redeclare function".
+if (function_exists('processar_checkout_universal')) {
+    return;
+}
+
 // 1. Configurações Iniciais do ASAAS (valores reais ficam no wp-config.php)
 if (!defined('REIKI_ASAAS_API_KEY'))       define('REIKI_ASAAS_API_KEY', '');
 if (!defined('REIKI_ASAAS_WEBHOOK_TOKEN')) define('REIKI_ASAAS_WEBHOOK_TOKEN', '');
