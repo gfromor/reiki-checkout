@@ -363,6 +363,7 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
+        'version'        => 'boleto-fix-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
@@ -1091,8 +1092,13 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
             }
 
             // Boleto simples: devolve o link do boleto p/ o cliente acessar (Asaas não envia por e-mail).
+            // Usa bankSlipUrl (PDF do boleto) ou, na falta, invoiceUrl (página hospedada do Asaas).
             if ($billing_type == 'BOLETO') {
-                $retorno['boleto_url'] = isset($resp['bankSlipUrl']) ? $resp['bankSlipUrl'] : '';
+                if (!empty($resp['bankSlipUrl'])) {
+                    $retorno['boleto_url'] = $resp['bankSlipUrl'];
+                } elseif (!empty($resp['invoiceUrl'])) {
+                    $retorno['boleto_url'] = $resp['invoiceUrl'];
+                }
             }
 
             if ( in_array($resp['status'], array('CONFIRMED', 'RECEIVED', 'ACTIVE')) ) {
