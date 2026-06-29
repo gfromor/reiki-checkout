@@ -428,6 +428,37 @@ function processar_custom_link_criacao( WP_REST_Request $request ) {
         return new WP_Error( 'erro_dados', 'Nome e pelo menos 1 Valor são obrigatórios.', array( 'status' => 400 ) );
     }
 
+    // T2.6: piso de preço quando o link LIBERA um curso (anti-fraude caso o token de admin vaze).
+    // 25% permite a renovação da CER por R$597 (≈30% de 1997) com folga e bloqueia "CER por R$1".
+    // Ajustável aqui (ou via wp-config). Cobrança avulsa (sem curso vinculado) não tem piso.
+    if (!defined('REIKI_CUSTOM_LINK_MIN_PCT')) define('REIKI_CUSTOM_LINK_MIN_PCT', 0.25);
+    if (!empty($curso_vinculado)) {
+        $catalogo = get_reiki_products();
+        if (isset($catalogo[$curso_vinculado])) {
+            $c = $catalogo[$curso_vinculado];
+            $pct = REIKI_CUSTOM_LINK_MIN_PCT;
+            $checks = array(
+                array('BRL', $brl, floatval($c['preco_brl'] ?? 0)),
+                array('USD', $usd, floatval($c['preco_usd'] ?? 0)),
+                array('EUR', $eur, floatval($c['preco_eur'] ?? 0)),
+            );
+            foreach ($checks as $chk) {
+                list($moeda, $valor, $preco_catalogo) = $chk;
+                if ($valor > 0 && $preco_catalogo > 0) {
+                    $minimo = round($preco_catalogo * $pct, 2);
+                    if ($valor < $minimo) {
+                        return new WP_Error(
+                            'preco_abaixo_minimo',
+                            sprintf('Preço em %s (%.2f) abaixo do mínimo para o curso "%s": mínimo %s %.2f (%d%% do catálogo). Ajuste o valor ou desvincule o curso.',
+                                $moeda, $valor, $c['nome'], $moeda, $minimo, intval($pct * 100)),
+                            array('status' => 400)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     $post_id = wp_insert_post(array(
         'post_title' => 'Link: ' . $nome,
         'post_type' => 'reiki_custom_link',
