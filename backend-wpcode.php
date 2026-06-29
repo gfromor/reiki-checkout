@@ -1935,9 +1935,15 @@ function processar_lead_checkout( WP_REST_Request $request ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
+    // Rate limit anti-flood (20/15min por IP). Resposta silenciosa p/ não sinalizar o limite a bots
+    // nem quebrar o fire-and-forget do frontend.
+    if (!reiki_admin_rate('lead', 20, 900)) {
+        return rest_ensure_response( array('sucesso' => true) );
+    }
+
     $params = $request->get_json_params();
     if (empty($params)) $params = $request->get_body_params();
-    
+
     $nome = sanitize_text_field( $params['nome'] ?? '' );
     $email = sanitize_email( $params['email'] ?? '' );
     $telefone = sanitize_text_field( $params['telefone'] ?? '' );
@@ -2021,10 +2027,12 @@ function reiki_dashboard_api( WP_REST_Request $request ) {
 
     $args = array(
         'post_type' => 'reiki_venda',
-        'posts_per_page' => -1,
+        'posts_per_page' => -1,        // necessário p/ os totais "Tudo" do dashboard
         'post_status' => 'publish',
         'orderby' => 'date',
-        'order' => 'DESC'
+        'order' => 'DESC',
+        'no_found_rows' => true,       // pula SQL_CALC_FOUND_ROWS (não há paginação aqui)
+        'update_post_term_cache' => false // vendas não usam taxonomias
     );
     $query = new WP_Query($args);
     $vendas = array();
@@ -2065,30 +2073,38 @@ function reiki_dashboard_api( WP_REST_Request $request ) {
         usort($leads, function($a, $b) { return strtotime($b['date']) - strtotime($a['date']); });
     }
 
-    // --- BALANCES ---
-    $asaas_balance = 0;
-    $asaas_response = reiki_asaas_request('GET', '/finance/balance');
-    if (!is_wp_error($asaas_response)) {
-        $body = json_decode(wp_remote_retrieve_body($asaas_response), true);
-        if (isset($body['balance'])) {
-            $asaas_balance = floatval($body['balance']);
+    // --- BALANCES (cache de 60s: evita martelar Asaas/Stripe a cada refresh/visibilitychange) ---
+    $balances_cache = get_transient('reiki_balances_cache');
+    if (is_array($balances_cache) && isset($balances_cache['asaas'], $balances_cache['stripe'])) {
+        $asaas_balance = $balances_cache['asaas'];
+        $stripe_balance = $balances_cache['stripe'];
+    } else {
+        $asaas_balance = 0;
+        $asaas_response = reiki_asaas_request('GET', '/finance/balance');
+        if (!is_wp_error($asaas_response)) {
+            $body = json_decode(wp_remote_retrieve_body($asaas_response), true);
+            if (isset($body['balance'])) {
+                $asaas_balance = floatval($body['balance']);
+            }
         }
-    }
 
-    $stripe_balance = array('available' => array(), 'pending' => array(), 'instant_available' => array());
-    $stripe_args = array('headers' => array('Authorization' => 'Bearer ' . REIKI_STRIPE_SECRET_KEY));
-    $stripe_response = wp_remote_get('https://api.stripe.com/v1/balance', $stripe_args);
-    if (!is_wp_error($stripe_response)) {
-        $body = json_decode(wp_remote_retrieve_body($stripe_response), true);
-        if (isset($body['available']) && is_array($body['available'])) {
-            $stripe_balance['available'] = $body['available'];
+        $stripe_balance = array('available' => array(), 'pending' => array(), 'instant_available' => array());
+        $stripe_args = array('headers' => array('Authorization' => 'Bearer ' . REIKI_STRIPE_SECRET_KEY));
+        $stripe_response = wp_remote_get('https://api.stripe.com/v1/balance', $stripe_args);
+        if (!is_wp_error($stripe_response)) {
+            $body = json_decode(wp_remote_retrieve_body($stripe_response), true);
+            if (isset($body['available']) && is_array($body['available'])) {
+                $stripe_balance['available'] = $body['available'];
+            }
+            if (isset($body['pending']) && is_array($body['pending'])) {
+                $stripe_balance['pending'] = $body['pending'];
+            }
+            if (isset($body['instant_available']) && is_array($body['instant_available'])) {
+                $stripe_balance['instant_available'] = $body['instant_available'];
+            }
         }
-        if (isset($body['pending']) && is_array($body['pending'])) {
-            $stripe_balance['pending'] = $body['pending'];
-        }
-        if (isset($body['instant_available']) && is_array($body['instant_available'])) {
-            $stripe_balance['instant_available'] = $body['instant_available'];
-        }
+
+        set_transient('reiki_balances_cache', array('asaas' => $asaas_balance, 'stripe' => $stripe_balance), 60);
     }
 
     $waitlist_raw = get_option('reiki_lista_espera', array());
