@@ -1090,6 +1090,11 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
                 }
             }
 
+            // Boleto simples: devolve o link do boleto p/ o cliente acessar (Asaas não envia por e-mail).
+            if ($billing_type == 'BOLETO') {
+                $retorno['boleto_url'] = isset($resp['bankSlipUrl']) ? $resp['bankSlipUrl'] : '';
+            }
+
             if ( in_array($resp['status'], array('CONFIRMED', 'RECEIVED', 'ACTIVE')) ) {
                 $nome_metodo = ($billing_type === 'CREDIT_CARD') ? ($is_assinatura ? 'Assinatura Crédito (Asaas)' : 'Cartão de Crédito (Asaas)') : (($billing_type === 'PIX') ? 'PIX (Asaas)' : 'Boleto (Asaas)');
                 conceder_acesso_curso($wp_user_id, $produto_id, $nome_metodo, null, $valor_total);
