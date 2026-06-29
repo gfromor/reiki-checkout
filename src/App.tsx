@@ -4,6 +4,17 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Turnstile } from '@marsidev/react-turnstile';
 
+// Helper: fetch com timeout (AbortController) — evita travar em "Processando..." se um gateway engasgar.
+async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 25000): Promise<Response> {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 // Chave Pública do Stripe (Pegue no Painel da Reiki Time Academy)
 const stripePromise = loadStripe('pk_live_51M4X8UJCAiZy2d8TofsRm9xrvVjItsdR1XycJvZFG1vYuYbecbGZLuGGpQLqVLUITrLon7v7g0Rz0Q0sK5zJSXSF006dJtMiSx');
 
@@ -220,7 +231,7 @@ function CheckoutForm() {
   useEffect(() => {
     const cleanCep = cep.replace(/\D/g, '');
     if (cleanCep.length === 8) {
-      fetch(`https://viacep.com.br/ws/${cleanCep}/json/`)
+      fetchWithTimeout(`https://viacep.com.br/ws/${cleanCep}/json/`, {}, 8000)
         .then(res => res.json())
         .then(data => {
           if (!data.erro) {
@@ -247,7 +258,7 @@ function CheckoutForm() {
   
   useEffect(() => {
     if (productId.startsWith('custom_')) {
-      fetch(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/custom-link?id=${productId}&t=${Date.now()}`)
+      fetchWithTimeout(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/custom-link?id=${productId}&t=${Date.now()}`, {}, 15000)
         .then(res => res.json())
         .then(data => {
           if (data.sucesso) {
@@ -310,7 +321,7 @@ function CheckoutForm() {
   useEffect(() => {
     if (couponCode) {
       // Usa a URL de produção para a API (EAD, onde o snippet backend-wpcode.php mora)
-      fetch(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/coupon?code=${couponCode}`)
+      fetchWithTimeout(`https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/coupon?code=${couponCode}`, {}, 12000)
         .then(res => res.json())
         .then(data => {
           if (data.sucesso) {
@@ -332,7 +343,7 @@ function CheckoutForm() {
       const fetchIntent = async () => {
         setClientSecret('');
         try {
-          const res = await fetch('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/stripe-intent', {
+          const res = await fetchWithTimeout('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/stripe-intent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -381,10 +392,10 @@ function CheckoutForm() {
       if (telefone) formData.append("telefone", telefone);
 
       // Fire-and-forget — não bloqueia nada, falha silenciosa
-      fetch("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/lead", {
+      fetchWithTimeout("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/lead", {
         method: "POST",
         body: formData
-      }).catch(() => {});
+      }, 10000).catch(() => {});
     }, 2000);
 
     return () => clearTimeout(timer);
@@ -553,7 +564,7 @@ function CheckoutForm() {
       payload.payment_intent_id = paymentIntentId;
       
       try {
-        const wpRes = await fetch("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout", {
+        const wpRes = await fetchWithTimeout("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -588,10 +599,12 @@ function CheckoutForm() {
         }
         
         setIsSuccess(true);
-      } catch (err) {
+      } catch (err: any) {
         turnstileRef.current?.reset();
         setTurnstileToken(null);
-        setServerError('Falha de conexão com nossos servidores.');
+        setServerError(err?.name === 'AbortError'
+          ? 'O servidor demorou a responder. Seu pagamento pode não ter sido processado — aguarde alguns instantes e verifique seu e-mail antes de tentar de novo.'
+          : 'Falha de conexão com nossos servidores.');
       }
       setIsLoading(false);
       return;
@@ -655,7 +668,7 @@ function CheckoutForm() {
 
     // 4. Enviar para o WordPress (EAD)
     try {
-      const response = await fetch('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout', {
+      const response = await fetchWithTimeout('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -676,10 +689,12 @@ function CheckoutForm() {
           setBoletoUrl(data.boleto_url);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       turnstileRef.current?.reset();
       setTurnstileToken(null);
-      setServerError('Falha de conexão com o servidor. Verifique sua internet.');
+      setServerError(err?.name === 'AbortError'
+        ? 'O servidor demorou a responder. Aguarde alguns instantes e verifique seu e-mail antes de tentar novamente.'
+        : 'Falha de conexão com o servidor. Verifique sua internet.');
     } finally {
       setIsLoading(false);
     }
