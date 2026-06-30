@@ -372,7 +372,7 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'tag-venda-1', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'estimado-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
@@ -414,6 +414,82 @@ function reiki_page_status_api( WP_REST_Request $request ) {
     }
     update_option('reiki_page_status', $store, false); // autoload off
     return rest_ensure_response( array('sucesso' => true, 'pages' => (object) $store) );
+}
+
+// "Estimado" (a receber) — boletos pendentes/vencidos do Asaas + assinaturas ativas (Asaas + Stripe).
+// SOMENTE LEITURA. É previsão, não dinheiro garantido (boleto pode não pagar, assinatura pode cancelar).
+function reiki_estimado_api( WP_REST_Request $request ) {
+    reiki_admin_cors();
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) return rest_ensure_response( array('status' => 'ok') );
+    if (!reiki_is_admin($request)) return new WP_Error('nao_autorizado', 'Acesso negado', array('status' => 401));
+
+    $cache = get_transient('reiki_estimado_cache');
+    if (is_array($cache)) return rest_ensure_response($cache);
+
+    // --- Asaas: boletos a vencer (PENDING) e vencidos (OVERDUE) ---
+    $a_vencer = array('total' => 0.0, 'qtd' => 0);
+    $vencidos = array('total' => 0.0, 'qtd' => 0);
+    foreach (array('PENDING', 'OVERDUE') as $status) {
+        $offset = 0; $loops = 0; $more = true;
+        while ($more && $loops < 15) {
+            $loops++;
+            $r = reiki_asaas_request('GET', '/payments?status=' . $status . '&billingType=BOLETO&limit=100&offset=' . $offset);
+            if (is_wp_error($r)) break;
+            $b = json_decode(wp_remote_retrieve_body($r), true);
+            if (empty($b['data'])) break;
+            foreach ($b['data'] as $p) {
+                $v = floatval($p['value']);
+                if ($status === 'PENDING') { $a_vencer['total'] += $v; $a_vencer['qtd']++; }
+                else { $vencidos['total'] += $v; $vencidos['qtd']++; }
+            }
+            $more = $b['hasMore'] ?? false;
+            $offset += 100;
+        }
+    }
+
+    // --- Asaas: assinaturas ativas (R$/mês) ---
+    $asaas_sub = array('total' => 0.0, 'qtd' => 0);
+    $sr = reiki_asaas_request('GET', '/subscriptions?status=ACTIVE&limit=100');
+    if (!is_wp_error($sr)) {
+        $sb = json_decode(wp_remote_retrieve_body($sr), true);
+        if (!empty($sb['data'])) foreach ($sb['data'] as $s) {
+            if (($s['cycle'] ?? '') === 'MONTHLY') {
+                $asaas_sub['total'] += floatval($s['value']);
+                $asaas_sub['qtd']++;
+            }
+        }
+    }
+
+    // --- Stripe: assinaturas ativas por moeda (/mês) ---
+    $stripe_sub = array();
+    $sa = array('headers' => array('Authorization' => 'Bearer ' . REIKI_STRIPE_SECRET_KEY));
+    $res = wp_remote_get('https://api.stripe.com/v1/subscriptions?status=active&limit=100', $sa);
+    if (!is_wp_error($res)) {
+        $sd = json_decode(wp_remote_retrieve_body($res), true);
+        if (!empty($sd['data'])) foreach ($sd['data'] as $sub) {
+            $price = $sub['items']['data'][0]['price'] ?? null;
+            if (!$price) continue;
+            $cur = strtoupper($price['currency'] ?? '');
+            $amt = floatval($price['unit_amount'] ?? 0) / 100;
+            if (($price['recurring']['interval'] ?? 'month') === 'year') $amt = $amt / 12;
+            if ($cur === '') continue;
+            if (!isset($stripe_sub[$cur])) $stripe_sub[$cur] = array('total' => 0.0, 'qtd' => 0);
+            $stripe_sub[$cur]['total'] += $amt;
+            $stripe_sub[$cur]['qtd']++;
+        }
+    }
+
+    $out = array(
+        'version' => 'estimado-1',
+        'asaas' => array(
+            'a_vencer'        => $a_vencer,
+            'vencidos'        => $vencidos,
+            'assinaturas_mes' => $asaas_sub,
+        ),
+        'stripe' => array('assinaturas' => (object) $stripe_sub),
+    );
+    set_transient('reiki_estimado_cache', $out, 300);
+    return rest_ensure_response($out);
 }
 
 // Status de um pagamento (T4.3) — usado pelo checkout pra atualizar a tela quando o PIX/boleto é pago.
@@ -493,6 +569,11 @@ add_action( 'rest_api_init', function () {
     register_rest_route( 'reiki/v1', '/payment-status', array(
         'methods' => 'GET, OPTIONS',
         'callback' => 'reiki_payment_status_api',
+        'permission_callback' => '__return_true'
+    ) );
+    register_rest_route( 'reiki/v1', '/estimado', array(
+        'methods' => 'GET, OPTIONS',
+        'callback' => 'reiki_estimado_api',
         'permission_callback' => '__return_true'
     ) );
     register_rest_route( 'reiki/v1', '/page-status', array(
