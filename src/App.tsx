@@ -496,14 +496,14 @@ function CheckoutForm() {
 
     if (currency === 'BRL' && (paymentMethod === 'pix_and_boleto' || paymentMethod === 'pix_and_card')) {
       const pixVal = Number(pixEntryValue) || 0;
-      if (pixVal <= 0 || pixVal >= total) {
+      if (pixVal <= 0 || pixVal >= basePrice) {
         newErrors.pixEntryValue = 'A entrada no Pix deve ser maior que 0 e menor que o valor total.';
       }
     }
 
     if (currency === 'BRL' && paymentMethod === 'two_cards') {
       const c1Val = Number(card1EntryValue) || 0;
-      if (c1Val <= 0 || c1Val >= total) {
+      if (c1Val <= 0 || c1Val >= basePrice) {
         newErrors.card1EntryValue = 'O valor no 1º cartão deve ser maior que 0 e menor que o valor total.';
       }
     }
@@ -556,9 +556,53 @@ function CheckoutForm() {
         return;
       }
 
+      // Assinatura internacional: /stripe-intent devolve um SetupIntent (seti_).
+      // Confirmamos o SetupIntent ANTES de o backend criar a assinatura.
+      if (paymentIntentId.startsWith('seti_')) {
+        const setupRes = await stripe.confirmSetup({
+          elements,
+          clientSecret,
+          confirmParams: { payment_method_data: { billing_details: { name: nome, email } } },
+          redirect: 'if_required',
+        });
+        if (setupRes.error) {
+          turnstileRef.current?.reset();
+          setTurnstileToken(null);
+          setServerError(setupRes.error.message || 'Erro ao validar o cartão.');
+          setIsLoading(false);
+          return;
+        }
+        payload.gateway = 'stripe_update';
+        payload.payment_intent_id = setupRes.setupIntent?.id || paymentIntentId;
+        try {
+          const subRes = await fetchWithTimeout('https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const subData: CheckoutResponse = await subRes.json();
+          if (!subRes.ok) {
+            turnstileRef.current?.reset();
+            setTurnstileToken(null);
+            setServerError(subData.message || 'Erro ao criar a assinatura. Tente novamente.');
+            setIsLoading(false);
+            return;
+          }
+          setIsSuccess(true);
+        } catch (err) {
+          turnstileRef.current?.reset();
+          setTurnstileToken(null);
+          setServerError(err instanceof Error && err.name === 'AbortError'
+            ? 'O servidor demorou a responder. Verifique seu e-mail antes de tentar de novo.'
+            : 'Falha de conexão com nossos servidores.');
+        }
+        setIsLoading(false);
+        return;
+      }
+
       payload.gateway = 'stripe_update';
       payload.payment_intent_id = paymentIntentId;
-      
+
       try {
         const wpRes = await fetchWithTimeout("https://ead.reikitimeacademy.com.br/wp-json/reiki/v1/checkout", {
           method: "POST",
@@ -615,7 +659,7 @@ function CheckoutForm() {
         payload.numero = numero;
     } else if (paymentMethod === 'two_cards') {
         const value1 = Number(card1EntryValue) || 0;
-        const value2 = Math.max(0, total - value1);
+        const value2 = Math.max(0, basePrice - value1); // base sem juros; o backend aplica os juros por cartão
         
         payload.cards = [
           {
@@ -639,7 +683,7 @@ function CheckoutForm() {
         payload.numero = numero;
     } else if (paymentMethod === 'pix_and_card') {
         const pixVal = Number(pixEntryValue) || 0;
-        const cardVal = Math.max(0, total - pixVal);
+        const cardVal = Math.max(0, basePrice - pixVal); // base sem juros; o backend aplica os juros no cartão
 
         payload.pix_value = pixVal;
         payload.card = {

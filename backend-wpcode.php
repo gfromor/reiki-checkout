@@ -29,10 +29,19 @@ if (!defined('REIKI_ADMIN_PIN_HASH'))   define('REIKI_ADMIN_PIN_HASH', ''); // v
 if (!defined('REIKI_LEGACY_PIN'))       define('REIKI_LEGACY_PIN', '20192021NZ');
 // TRANSIÇÃO: deixe true até publicar o frontend novo (login por token). Depois mude para false.
 if (!defined('REIKI_ALLOW_LEGACY_PIN')) define('REIKI_ALLOW_LEGACY_PIN', true);
+// Token da API de venda externa (idfeminino). Mova p/ wp-config e rotacione; fallback mantém a integração viva.
+if (!defined('REIKI_EXTERNAL_API_KEY')) define('REIKI_EXTERNAL_API_KEY', 'REIKI_EXT_2026_NZ');
+
+// IP real do cliente (CF-Connecting-IP atrás do Cloudflare; senão REMOTE_ADDR).
+function reiki_client_ip() {
+    return isset($_SERVER['HTTP_CF_CONNECTING_IP'])
+        ? sanitize_text_field($_SERVER['HTTP_CF_CONNECTING_IP'])
+        : sanitize_text_field($_SERVER['REMOTE_ADDR'] ?? '0');
+}
 
 // Rate limit por IP (usa CF-Connecting-IP atrás do Cloudflare). true = liberado.
 function reiki_admin_rate($scope, $max = 8, $janela = 900) {
-    $ip = isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? $_SERVER['HTTP_CF_CONNECTING_IP'] : ($_SERVER['REMOTE_ADDR'] ?? '0');
+    $ip = reiki_client_ip();
     $k = 'reiki_rl_' . $scope . '_' . md5($ip);
     $n = (int) get_transient($k);
     if ($n >= $max) return false;
@@ -363,7 +372,7 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'pagestatus-2', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'audit3-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
@@ -574,6 +583,10 @@ function processar_custom_link_criacao( WP_REST_Request $request ) {
     if (!defined('REIKI_CUSTOM_LINK_MIN_PCT')) define('REIKI_CUSTOM_LINK_MIN_PCT', 0.25);
     if (!empty($curso_vinculado)) {
         $catalogo = get_reiki_products();
+        if (!isset($catalogo[$curso_vinculado])) {
+            // Curso vinculado tem que existir no catálogo (senão cobra e não libera acesso)
+            return new WP_Error('curso_invalido', 'Curso vinculado não existe no catálogo.', array('status' => 400));
+        }
         if (isset($catalogo[$curso_vinculado])) {
             $c = $catalogo[$curso_vinculado];
             $pct = REIKI_CUSTOM_LINK_MIN_PCT;
@@ -747,6 +760,10 @@ function validar_cupom_woocommerce( WP_REST_Request $request ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
+    if (!reiki_admin_rate('coupon', 30, 600)) {
+        return new WP_Error( 'rate_limit', 'Muitas tentativas.', array( 'status' => 429 ) );
+    }
+
     if ( !class_exists('WC_Coupon') ) {
         return new WP_Error( 'sem_woo', 'WooCommerce não ativo', array( 'status' => 500 ) );
     }
@@ -850,7 +867,7 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
         'body' => array(
             'secret'   => REIKI_TURNSTILE_SECRET_KEY,
             'response' => $turnstile_token,
-            'remoteip' => isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : ''
+            'remoteip' => reiki_client_ip()
         )
     ));
     
@@ -961,7 +978,7 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
     }
 
     // --- RATE LIMITING ---
-    $ip_cliente = $_SERVER['REMOTE_ADDR'];
+    $ip_cliente = reiki_client_ip();
     $transient_name = 'rate_limit_' . md5($ip_cliente);
     $tentativas = get_transient( $transient_name ) ?: 0;
     if ( $tentativas > 5 ) return new WP_Error( 'rate_limit', 'Muitas tentativas.', array( 'status' => 429 ) );
@@ -1223,49 +1240,62 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
         $is_setup_intent = strpos($payment_intent_id, 'seti_') === 0;
 
         if ($is_setup_intent) {
-            // 1. Obter o SetupIntent para pegar o payment_method
+            // 1. O SetupIntent JÁ deve ter sido confirmado no frontend. Valida antes de criar a assinatura.
             $setup_intent_resp = wp_remote_get('https://api.stripe.com/v1/setup_intents/' . $payment_intent_id, array('headers' => $stripe_headers));
-            $setup_intent_data = json_decode(wp_remote_retrieve_body($setup_intent_resp), true);
+            $setup_intent_data = is_wp_error($setup_intent_resp) ? null : json_decode(wp_remote_retrieve_body($setup_intent_resp), true);
+            if (($setup_intent_data['status'] ?? '') !== 'succeeded' || empty($setup_intent_data['payment_method'])) {
+                return new WP_Error('setup_invalido', 'Cartão ainda não confirmado.', array('status' => 400));
+            }
             $payment_method_id = $setup_intent_data['payment_method'];
 
-            // 2. Criar Cliente no Stripe
+            // 2. Criar Cliente
             $customer_body = http_build_query(array(
                 'name' => $nome,
                 'email' => $email,
                 'payment_method' => $payment_method_id,
                 'invoice_settings[default_payment_method]' => $payment_method_id
             ));
-            $customer_resp = wp_remote_post('https://api.stripe.com/v1/customers', array('headers' => $stripe_headers, 'body' => $customer_body));
-            $customer_id = json_decode(wp_remote_retrieve_body($customer_resp), true)['id'];
+            $customer_resp = wp_remote_post('https://api.stripe.com/v1/customers', array('headers' => $stripe_headers, 'body' => $customer_body, 'timeout' => 30));
+            $customer_data = is_wp_error($customer_resp) ? null : json_decode(wp_remote_retrieve_body($customer_resp), true);
+            if (empty($customer_data['id'])) return new WP_Error('erro_stripe', 'Falha ao criar cliente na Stripe.', array('status' => 502));
+            $customer_id = $customer_data['id'];
 
-            // 3. Criar Produto Temporário
+            // 3. Criar Produto
             $prod_body = http_build_query(array('name' => $descricao_compra));
-            $prod_resp = wp_remote_post('https://api.stripe.com/v1/products', array('headers' => $stripe_headers, 'body' => $prod_body));
-            $prod_id = json_decode(wp_remote_retrieve_body($prod_resp), true)['id'];
+            $prod_resp = wp_remote_post('https://api.stripe.com/v1/products', array('headers' => $stripe_headers, 'body' => $prod_body, 'timeout' => 30));
+            $prod_data = is_wp_error($prod_resp) ? null : json_decode(wp_remote_retrieve_body($prod_resp), true);
+            if (empty($prod_data['id'])) return new WP_Error('erro_stripe', 'Falha ao criar produto na Stripe.', array('status' => 502));
+            $prod_id = $prod_data['id'];
 
-            // 4. Criar Price
+            // 4. Criar Price (mensal)
             $parcelas_ass = intval($produto_info['parcelas_subscription'] ?? 1);
             if ($parcelas_ass < 2) $parcelas_ass = 2;
             $valor_mensal = round($valor_total / $parcelas_ass, 2);
+            $valor_mensal_cents = intval(round($valor_mensal * 100));
             $price_body = http_build_query(array(
                 'product' => $prod_id,
                 'currency' => strtolower($currency),
-                'unit_amount' => intval($valor_mensal * 100),
+                'unit_amount' => $valor_mensal_cents,
                 'recurring[interval]' => 'month'
             ));
-            $price_resp = wp_remote_post('https://api.stripe.com/v1/prices', array('headers' => $stripe_headers, 'body' => $price_body));
-            $price_id = json_decode(wp_remote_retrieve_body($price_resp), true)['id'];
+            $price_resp = wp_remote_post('https://api.stripe.com/v1/prices', array('headers' => $stripe_headers, 'body' => $price_body, 'timeout' => 30));
+            $price_data = is_wp_error($price_resp) ? null : json_decode(wp_remote_retrieve_body($price_resp), true);
+            if (empty($price_data['id'])) return new WP_Error('erro_stripe', 'Falha ao criar preço na Stripe.', array('status' => 502));
+            $price_id = $price_data['id'];
 
-            // 5. Criar Subscription
+            // 5. Criar Subscription (com amount_esperado_mensal p/ o webhook validar o valor da fatura)
             $sub_body = http_build_query(array(
                 'customer' => $customer_id,
                 'items[0][price]' => $price_id,
                 'metadata[wp_user_id]' => $wp_user_id,
                 'metadata[produto_id]' => $produto_id,
                 'metadata[bumps]' => implode(',', $bumps_selecionados),
-                'metadata[cupom_id]' => $cupom_id_queimado
+                'metadata[cupom_id]' => $cupom_id_queimado,
+                'metadata[amount_esperado_mensal]' => $valor_mensal_cents
             ));
             $response = wp_remote_post('https://api.stripe.com/v1/subscriptions', array('headers' => $stripe_headers, 'body' => $sub_body, 'timeout' => 30));
+            $sub_data = is_wp_error($response) ? null : json_decode(wp_remote_retrieve_body($response), true);
+            if (empty($sub_data['id'])) return new WP_Error('erro_stripe', 'Falha ao criar assinatura na Stripe.', array('status' => 502));
         } else {
             $stripe_body = http_build_query(array(
                 'description' => $descricao_compra,
@@ -1355,8 +1385,8 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
 // 2. WEBHOOK DO ASAAS
 // =========================================================================
 function processar_webhook_asaas( WP_REST_Request $request ) {
-    $token_enviado = $request->get_header('asaas-access-token');
-    
+    $token_enviado = (string) $request->get_header('asaas-access-token');
+
     // SEGURANÇA: Rejeita se o token não estiver configurado no servidor ou se o enviado não bater
     if ( !defined('REIKI_ASAAS_WEBHOOK_TOKEN') || REIKI_ASAAS_WEBHOOK_TOKEN === '' || !hash_equals(REIKI_ASAAS_WEBHOOK_TOKEN, $token_enviado) ) {
         return new WP_Error( 'nao_autorizado', 'Token de Webhook inválido ou não configurado', array( 'status' => 401 ) );
@@ -1633,7 +1663,15 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
                 if (!empty($sub_data['metadata']['wp_user_id']) && !empty($sub_data['metadata']['produto_id'])) {
                     $wp_user_id = intval($sub_data['metadata']['wp_user_id']);
                     $produto_id = sanitize_text_field($sub_data['metadata']['produto_id']);
-                    
+
+                    // Anti-bypass: confere o valor pago da fatura contra o esperado (assinaturas novas têm o metadado)
+                    $esperado_mensal = intval($sub_data['metadata']['amount_esperado_mensal'] ?? 0);
+                    $pago_invoice = intval($invoice['amount_paid'] ?? 0);
+                    if ($esperado_mensal > 0 && $pago_invoice < $esperado_mensal) {
+                        error_log("STRIPE ASSINATURA VALOR DIVERGENTE: pago=$pago_invoice esperado=$esperado_mensal invoice=" . ($invoice['id'] ?? ''));
+                        return rest_ensure_response(array('recebido' => true, 'msg' => 'valor divergente'));
+                    }
+
                     // Idempotência
                     $invoice_id = $invoice['id'];
                     if (!get_user_meta($wp_user_id, '_stripe_processed_' . $invoice_id, true)) {
@@ -2206,9 +2244,14 @@ function processar_lista_espera( WP_REST_Request $request ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
+    // Rate limit anti-flood (silencioso)
+    if (!reiki_admin_rate('waitlist', 20, 900)) {
+        return rest_ensure_response( array('sucesso' => true) );
+    }
+
     $params = $request->get_json_params();
     if (empty($params)) $params = $request->get_body_params();
-    
+
     $email = sanitize_email( $params['email'] ?? '' );
     $phone = sanitize_text_field( $params['phone'] ?? '' );
     $origem = sanitize_text_field( $params['origem'] ?? 'geral' );
@@ -2224,7 +2267,14 @@ function processar_lista_espera( WP_REST_Request $request ) {
             'origem' => $origem,
             'hora' => current_time('mysql')
         );
-        update_option('reiki_lista_espera', $waitlist);
+        if (count($waitlist) > 1000) {
+            $waitlist = array_slice($waitlist, -1000, null, true);
+        }
+        if (get_option('reiki_lista_espera', false) === false) {
+            add_option('reiki_lista_espera', $waitlist, '', 'no'); // autoload off
+        } else {
+            update_option('reiki_lista_espera', $waitlist);
+        }
     }
     return rest_ensure_response( array('sucesso' => true) );
 }
@@ -2770,11 +2820,14 @@ function registrar_venda_externa_api( WP_REST_Request $request ) {
         return rest_ensure_response( array('status' => 'ok') );
     }
 
-    $token_enviado = $request->get_header('x-reiki-api-key');
-    
-    // SEGURANÇA: Token secreto
-    $token_secreto = 'REIKI_EXT_2026_NZ'; // Pode ser alterado depois se quiser
-    if ( $token_enviado !== $token_secreto ) {
+    // Rate limit anti-abuso (60/h por IP)
+    if (!reiki_admin_rate('venda_externa', 60, 3600)) {
+        return new WP_Error( 'rate_limit', 'Muitas tentativas.', array( 'status' => 429 ) );
+    }
+
+    // SEGURANÇA: token vem de REIKI_EXTERNAL_API_KEY (wp-config); comparação constant-time
+    $token_enviado = (string) $request->get_header('x-reiki-api-key');
+    if ( !hash_equals(REIKI_EXTERNAL_API_KEY, $token_enviado) ) {
         return new WP_Error( 'nao_autorizado', 'Token de API inválido', array( 'status' => 401 ) );
     }
 
