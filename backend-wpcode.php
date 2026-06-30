@@ -372,7 +372,7 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'audit3-1', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'tag-venda-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
@@ -1221,7 +1221,7 @@ function _processar_checkout_universal_internal( WP_REST_Request $request ) {
 
             if ( in_array($resp['status'], array('CONFIRMED', 'RECEIVED', 'ACTIVE')) ) {
                 $nome_metodo = ($billing_type === 'CREDIT_CARD') ? ($is_assinatura ? 'Assinatura Crédito (Asaas)' : 'Cartão de Crédito (Asaas)') : (($billing_type === 'PIX') ? 'PIX (Asaas)' : 'Boleto (Asaas)');
-                conceder_acesso_curso($wp_user_id, $produto_id, $nome_metodo, null, $valor_total);
+                conceder_acesso_curso($wp_user_id, $produto_id, $nome_metodo, null, $valor_total, true, ($resp['id'] ?? ''), 'asaas');
                 if (!empty($bumps_selecionados)) processar_acesso_bumps($wp_user_id, $bumps_selecionados);
                 if ($cupom_id_queimado > 0 && function_exists('wc_update_coupon_usage_counts')) wc_update_coupon_usage_counts( $cupom_id_queimado );
             }
@@ -1469,7 +1469,7 @@ function processar_webhook_asaas( WP_REST_Request $request ) {
                     }
                 }
 
-                conceder_acesso_curso($wp_user_id, $produto_id, $nome_metodo, null, $valor_pago, $registrar_venda);
+                conceder_acesso_curso($wp_user_id, $produto_id, $nome_metodo, null, $valor_pago, $registrar_venda, ($payment['id'] ?? ''), 'asaas');
                 
                 if (isset($parts[2]) && !empty($parts[2])) {
                     $bumps_selecionados = explode(',', $parts[2]);
@@ -1637,7 +1637,7 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
                 }
             }
             
-            conceder_acesso_curso($wp_user_id, $produto_id, 'Cartão de Crédito (Stripe)', $valor_nzd > 0 ? $valor_nzd : null);
+            conceder_acesso_curso($wp_user_id, $produto_id, 'Cartão de Crédito (Stripe)', $valor_nzd > 0 ? $valor_nzd : null, null, true, ($charge_id ?? ''), 'stripe');
             
             if (!empty($payment_intent['metadata']['bumps'])) {
                 $bumps_selecionados = explode(',', $payment_intent['metadata']['bumps']);
@@ -1676,7 +1676,7 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
                     $invoice_id = $invoice['id'];
                     if (!get_user_meta($wp_user_id, '_stripe_processed_' . $invoice_id, true)) {
                         update_user_meta($wp_user_id, '_stripe_processed_' . $invoice_id, true);
-                        conceder_acesso_curso($wp_user_id, $produto_id, 'Assinatura Crédito (Stripe)', null);
+                        conceder_acesso_curso($wp_user_id, $produto_id, 'Assinatura Crédito (Stripe)', null, null, true, ($invoice['charge'] ?? ''), 'stripe');
                     }
                 }
             }
@@ -1724,7 +1724,7 @@ function processar_webhook_stripe( WP_REST_Request $request ) {
 // =========================================================================
 // FUNÇÕES AUXILIARES
 // =========================================================================
-function conceder_acesso_curso($wp_user_id, $produto_id, $metodo = 'Checkout', $valor_nzd = null, $valor_brl_override = null, $registrar_venda = true) {
+function conceder_acesso_curso($wp_user_id, $produto_id, $metodo = 'Checkout', $valor_nzd = null, $valor_brl_override = null, $registrar_venda = true, $gw_id = '', $gw_type = '') {
     $produtos = get_reiki_products();
     reiki_log_tx('acesso_liberado', array(
         'gateway'    => $metodo,
@@ -1821,6 +1821,12 @@ function conceder_acesso_curso($wp_user_id, $produto_id, $metodo = 'Checkout', $
                 }
                 
                 update_post_meta($post_id, 'gateway', $metodo);
+
+                // Id do gateway: deixa o importador deduplicar com precisão (nunca duplica essa venda)
+                if ($gw_id !== '') {
+                    if ($gw_type === 'asaas') update_post_meta($post_id, '_asaas_payment_id', $gw_id);
+                    elseif ($gw_type === 'stripe') update_post_meta($post_id, '_stripe_charge_id', $gw_id);
+                }
             }
 
             if (defined('REIKI_ONESIGNAL_APP_ID') && defined('REIKI_ONESIGNAL_REST_KEY') && REIKI_ONESIGNAL_APP_ID !== '') {
