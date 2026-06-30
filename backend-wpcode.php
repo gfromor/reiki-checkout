@@ -363,7 +363,7 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'pagestatus-1', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'pagestatus-2', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
@@ -661,8 +661,12 @@ function obter_custom_link_detalhes( WP_REST_Request $request ) {
         return new WP_Error( 'nao_encontrado', 'Link não encontrado.', array( 'status' => 404 ) );
     }
 
+    $ps = get_option('reiki_page_status', array());
+    $link_status = (is_array($ps) && isset($ps[$id])) ? $ps[$id] : 'active';
+
     return rest_ensure_response(array(
         'sucesso' => true,
+        'status' => $link_status,
         'title' => get_post_meta($post_id, 'nome_exibicao', true),
         'subtitle' => 'Cobrança Avulsa Exclusiva',
         'brlPrice' => floatval(get_post_meta($post_id, 'preco_brl', true)),
@@ -696,11 +700,14 @@ function obter_lista_custom_links( WP_REST_Request $request ) {
     );
     $query = new WP_Query($args);
     $links = array();
+    $ps = get_option('reiki_page_status', array());
+    if (!is_array($ps)) $ps = array();
 
     foreach ($query->posts as $post) {
         $link_id = 'custom_' . $post->ID;
         $links[] = array(
             'id' => $link_id,
+            'status' => isset($ps[$link_id]) ? $ps[$link_id] : 'active',
             'name' => get_post_meta($post->ID, 'nome_exibicao', true) ?: $post->post_title,
             'date' => get_the_date('d/m/Y H:i', $post),
             'link_brl' => 'https://checkout.reikitimeacademy.com.br/?produto=' . $link_id . '&currency=BRL',

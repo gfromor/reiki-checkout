@@ -67,6 +67,8 @@ export interface CouponResponse {
 
 export interface CustomLinkResponse {
   sucesso?: boolean;
+  status?: string; // active | off | espera
+
   title?: string;
   subtitle?: string;
   brlPrice?: number;

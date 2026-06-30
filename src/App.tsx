@@ -261,6 +261,9 @@ function CheckoutForm() {
         .then(res => res.json())
         .then((data: CustomLinkResponse) => {
           if (data.sucesso) {
+            // Status do link (controlado no PWA): off -> ajuda, espera -> vagas-esgotadas
+            if (data.status === 'off') { window.location.replace('https://ajuda.reikitimeacademy.com.br'); return; }
+            if (data.status === 'espera') { window.location.replace('https://vagas-esgotadas.reikitimeacademy.com.br'); return; }
             setProduct({
               title: data.title ?? '',
               subtitle: data.subtitle ?? '',
