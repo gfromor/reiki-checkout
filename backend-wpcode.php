@@ -363,11 +363,48 @@ function reiki_catalog_api( WP_REST_Request $request ) {
     }
 
     return rest_ensure_response( array(
-        'version'        => 'paystatus-1', // marcador p/ confirmar qual versão do backend está no ar
+        'version'        => 'pagestatus-1', // marcador p/ confirmar qual versão do backend está no ar
         'products'       => $out,
         'interest_rates' => get_reiki_interest_rates(),
         'bumps'          => get_reiki_bumps()
     ) );
+}
+
+// Status das páginas de vendas — o PWA liga/desliga e as LPs leem e redirecionam.
+// active (padrão) | off (-> ajuda) | espera (-> vagas-esgotadas)
+function reiki_page_status_api( WP_REST_Request $request ) {
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+    if ($origin && (strpos($origin, 'reikitimeacademy.com.br') !== false || strpos($origin, 'pages.dev') !== false || strpos($origin, 'localhost') !== false)) {
+        header("Access-Control-Allow-Origin: " . $origin);
+    }
+    header("Vary: Origin");
+    header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type, x-admin-token, x-dashboard-pin");
+    if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) return rest_ensure_response( array('status' => 'ok') );
+
+    $store = get_option('reiki_page_status', array());
+    if (!is_array($store)) $store = array();
+
+    if ( $_SERVER['REQUEST_METHOD'] === 'GET' ) {
+        header("Cache-Control: public, max-age=10");
+        return rest_ensure_response( array('pages' => (object) $store) );
+    }
+
+    // POST -> só admin
+    if (!reiki_is_admin($request)) return new WP_Error('nao_autorizado', 'Acesso negado', array('status' => 401));
+    $params = $request->get_json_params();
+    $page   = sanitize_text_field($params['page'] ?? '');
+    $status = sanitize_text_field($params['status'] ?? '');
+    if (empty($page) || !in_array($status, array('active', 'off', 'espera'))) {
+        return new WP_Error('erro', 'page/status inválidos', array('status' => 400));
+    }
+    if ($status === 'active') {
+        unset($store[$page]);
+    } else {
+        $store[$page] = $status;
+    }
+    update_option('reiki_page_status', $store, false); // autoload off
+    return rest_ensure_response( array('sucesso' => true, 'pages' => (object) $store) );
 }
 
 // Status de um pagamento (T4.3) — usado pelo checkout pra atualizar a tela quando o PIX/boleto é pago.
@@ -447,6 +484,11 @@ add_action( 'rest_api_init', function () {
     register_rest_route( 'reiki/v1', '/payment-status', array(
         'methods' => 'GET, OPTIONS',
         'callback' => 'reiki_payment_status_api',
+        'permission_callback' => '__return_true'
+    ) );
+    register_rest_route( 'reiki/v1', '/page-status', array(
+        'methods' => 'GET, POST, OPTIONS',
+        'callback' => 'reiki_page_status_api',
         'permission_callback' => '__return_true'
     ) );
     register_rest_route( 'reiki/v1', '/lead', array(
