@@ -59,8 +59,8 @@ function reiki_admin_cors() {
     header("Access-Control-Allow-Headers: Content-Type, Authorization, x-admin-token, x-dashboard-pin");
 }
 
-// Gera um token assinado (HMAC) com expiração. Padrão: 12h.
-function reiki_make_admin_token($ttl = 43200) {
+// Gera um token assinado (HMAC) com expiração. Padrão: 30 dias.
+function reiki_make_admin_token($ttl = 2592000) {
     $exp = time() + $ttl;
     return $exp . '.' . hash_hmac('sha256', (string) $exp, REIKI_ADMIN_SECRET);
 }
@@ -110,7 +110,7 @@ function reiki_admin_login_api( WP_REST_Request $request ) {
 
     if (!$ok) return new WP_Error('nao_autorizado', 'PIN incorreto', array('status' => 401));
 
-    return rest_ensure_response(array('token' => reiki_make_admin_token(), 'exp' => time() + 43200));
+    return rest_ensure_response(array('token' => reiki_make_admin_token(), 'exp' => time() + 2592000));
 }
 
 // =========================================================================
@@ -282,9 +282,9 @@ function get_reiki_products() {
         'cer' => array(
             'nome' => 'Formação CER',
             'membership_id' => 12219,
-            'preco_brl' => 1997.00,
-            'preco_usd' => 397.00,
-            'preco_eur' => 347.00
+            'preco_brl' => 2197.00,
+            'preco_usd' => 425.00,
+            'preco_eur' => 375.00
         ),
         'infinity' => array(
             'nome' => 'Infinity Reiki',
@@ -659,7 +659,7 @@ function processar_custom_link_criacao( WP_REST_Request $request ) {
     }
 
     // T2.6: piso de preço quando o link LIBERA um curso (anti-fraude caso o token de admin vaze).
-    // 25% permite a renovação da CER por R$597 (≈30% de 1997) com folga e bloqueia "CER por R$1".
+    // 25% permite a renovação da CER por R$597 (≈27% de 2197) com folga e bloqueia "CER por R$1".
     // Ajustável aqui (ou via wp-config). Cobrança avulsa (sem curso vinculado) não tem piso.
     if (!defined('REIKI_CUSTOM_LINK_MIN_PCT')) define('REIKI_CUSTOM_LINK_MIN_PCT', 0.25);
     if (!empty($curso_vinculado)) {
@@ -2850,7 +2850,7 @@ function processar_stripe_intent_criacao( WP_REST_Request $request ) {
         // Para assinaturas precisamos de um SetupIntent
         $stripe_body = http_build_query(array(
             'usage' => 'off_session',
-            'automatic_payment_methods[enabled]' => 'true',
+            'payment_method_types[0]' => 'card', // SÓ cartão no nosso checkout (bloqueia MB WAY, SEPA, Afterpay, etc.)
             'metadata[produto_id]' => $produto_id,
             'metadata[bumps]' => implode(',', $bumps_selecionados),
             'metadata[cupom_id]' => ($cupom_aplicado && class_exists('WC_Coupon')) ? (new WC_Coupon($cupom_aplicado))->get_id() : ''
@@ -2865,7 +2865,7 @@ function processar_stripe_intent_criacao( WP_REST_Request $request ) {
         $stripe_body = http_build_query(array(
             'amount' => $amount_cents,
             'currency' => $currency,
-            'automatic_payment_methods[enabled]' => 'true',
+            'payment_method_types[0]' => 'card', // SÓ cartão no nosso checkout (bloqueia MB WAY, SEPA, Afterpay, etc.)
             'metadata[produto_id]' => $produto_id,
             'metadata[amount_esperado]' => $amount_cents,
             'metadata[bumps]' => implode(',', $bumps_selecionados),

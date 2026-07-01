@@ -70,8 +70,8 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
   'cer': {
     title: 'Certificação Expert Reiki Completa',
     subtitle: 'Curso Expert Reiki V2 + Bônus Físicos e Digitais',
-    brlPrice: 1997.00, brlOriginal: 5188.00,
-    usdPrice: 397.00, eurPrice: 347.00,
+    brlPrice: 2197.00, brlOriginal: 5188.00,
+    usdPrice: 425.00, eurPrice: 375.00,
     image: '/cer.png'
   },
   'infinity': {
