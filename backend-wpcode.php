@@ -282,9 +282,9 @@ function get_reiki_products() {
         'cer' => array(
             'nome' => 'Formação CER',
             'membership_id' => 12219,
-            'preco_brl' => 2197.00,
-            'preco_usd' => 425.00,
-            'preco_eur' => 375.00
+            'preco_brl' => 1297.00, // 🎂 ANIVER 02/07 — original: 2197.00
+            'preco_usd' => 255.00,  // original: 425.00
+            'preco_eur' => 225.00   // original: 375.00
         ),
         'infinity' => array(
             'nome' => 'Infinity Reiki',
@@ -303,23 +303,51 @@ function get_reiki_products() {
         'reiki-florescer' => array(
             'nome' => 'Reiki Florescer',
             'membership_id' => 12226,
-            'preco_brl' => 297.00,
-            'preco_usd' => 60.00,
-            'preco_eur' => 55.00
+            'preco_brl' => 97.00,   // 🎂 ANIVER 02/07 — original: 297.00
+            'preco_usd' => 20.00,   // original: 60.00
+            'preco_eur' => 18.00    // original: 55.00
         ),
         'guardias' => array(
-            'nome' => 'Guardiãs do Ventre',
+            'nome' => 'Guardiãs do Clã',
             'membership_id' => 13180,
-            'preco_brl' => 997.00,
-            'preco_usd' => 200.00,
-            'preco_eur' => 175.00
+            'preco_brl' => 597.00,  // 🎂 ANIVER 02/07 — original: 997.00
+            'preco_usd' => 120.00,  // original: 200.00
+            'preco_eur' => 105.00   // original: 175.00
         ),
         'mandalas-reiki' => array(
             'nome' => 'Mandalas de Reiki',
             'membership_id' => 12229,
-            'preco_brl' => 197.00,
-            'preco_usd' => 40.00,
-            'preco_eur' => 35.00
+            'preco_brl' => 29.90,   // 🎂 ANIVER 02/07 — original: 197.00
+            'preco_usd' => 6.00,    // original: 40.00
+            'preco_eur' => 6.00     // original: 35.00
+        ),
+        'reiki-cristais' => array(
+            'nome' => 'Reiki e Cristais',
+            'membership_id' => 12221,
+            'preco_brl' => 47.00,   // 🎂 ANIVER — preço regular: 597.00
+            'preco_usd' => 10.00,
+            'preco_eur' => 9.00
+        ),
+        'masterclass-chakras' => array(
+            'nome' => 'Masterclass Chakras Avançados',
+            'membership_id' => 12225,
+            'preco_brl' => 29.90,   // 🎂 ANIVER — preço regular: 197.00
+            'preco_usd' => 6.00,
+            'preco_eur' => 6.00
+        ),
+        'cla-do-livro' => array(
+            'nome' => 'O Clã do Livro',
+            'membership_id' => 12227,
+            'preco_brl' => 97.00,   // 🎂 ANIVER — preço regular: 297.00 (acesso até 31/12/26)
+            'preco_usd' => 20.00,
+            'preco_eur' => 18.00
+        ),
+        'negocio-magnetico' => array(
+            'nome' => 'Negócio Magnético',
+            'membership_id' => 12722,
+            'preco_brl' => 29.90,   // 🎂 ANIVER — preço regular: 97.00 (3 meses de acesso)
+            'preco_usd' => 6.00,
+            'preco_eur' => 6.00
         ),
         'ebook' => array(
             'nome' => 'Ebook',

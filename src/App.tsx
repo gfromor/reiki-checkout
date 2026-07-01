@@ -54,10 +54,10 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
   'guardias': { 
     title: 'Formação Guardiãs do Clã', 
     subtitle: 'Turma Fundadora', 
-    brlPrice: 997, 
-    brlOriginal: 1297, 
-    usdPrice: 200, 
-    eurPrice: 175, 
+    brlPrice: 597, // 🎂 ANIVER 02/07 — original: 997 / 200 / 175
+    brlOriginal: 997, 
+    usdPrice: 120, 
+    eurPrice: 105, 
     image: 'https://reikitimeacademy.com.br/wp-content/uploads/2026/03/guardias-hero-bg.png' 
   },
   'cuidar': { 
@@ -70,8 +70,8 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
   'cer': {
     title: 'Certificação Expert Reiki Completa',
     subtitle: 'Curso Expert Reiki V2 + Bônus Físicos e Digitais',
-    brlPrice: 2197.00, brlOriginal: 5188.00,
-    usdPrice: 425.00, eurPrice: 375.00,
+    brlPrice: 1297.00, brlOriginal: 2197.00, // 🎂 ANIVER 02/07 — original: 2197 / 425 / 375
+    usdPrice: 255.00, eurPrice: 225.00,
     image: '/cer.png'
   },
   'infinity': {
@@ -84,15 +84,15 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
   'mandalas-reiki': {
     title: 'Mandalas de Reiki',
     subtitle: 'Curso gravado — 6 meses de acesso + manual e mandalas em PDF',
-    brlPrice: 197.00, brlOriginal: 297.00,
-    usdPrice: 40.00, eurPrice: 35.00,
+    brlPrice: 29.90, brlOriginal: 197.00, // 🎂 ANIVER 02/07 — original: 197 / 40 / 35
+    usdPrice: 6.00, eurPrice: 6.00,
     image: '/mandalas.png'
   },
   'reiki-florescer': {
     title: 'Reiki Florescer',
     subtitle: 'Acesso completo',
-    brlPrice: 297.00, brlOriginal: 497.00,
-    usdPrice: 60.00, eurPrice: 55.00,
+    brlPrice: 97.00, brlOriginal: 297.00, // 🎂 ANIVER 02/07 — original: 297 / 60 / 55
+    usdPrice: 20.00, eurPrice: 18.00,
     image: '/infinity.png' // default image until they have a specific one
   },
   'desafio-infinity': {
@@ -101,6 +101,34 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     brlPrice: 67.00, brlOriginal: 697.00,
     usdPrice: 17.00, eurPrice: 17.00,
     image: '/infinity.png'
+  },
+  'reiki-cristais': {
+    title: 'Reiki e Cristais',
+    subtitle: '+70 protocolos prontos unindo cristais e Reiki — 6 meses de acesso',
+    brlPrice: 47.00, brlOriginal: 597.00, // 🎂 ANIVER — regular: 597
+    usdPrice: 10.00, eurPrice: 9.00,
+    image: 'https://reikitimeacademy.com.br/wp-content/uploads/2025/07/Ametista.png'
+  },
+  'masterclass-chakras': {
+    title: 'Masterclass Chakras Avançados',
+    subtitle: 'Diagnóstico e harmonização em nível avançado — 6 meses de acesso',
+    brlPrice: 29.90, brlOriginal: 197.00, // 🎂 ANIVER — regular: 197
+    usdPrice: 6.00, eurPrice: 6.00,
+    image: 'https://reikitimeacademy.com.br/wp-content/uploads/2025/07/6-1.png'
+  },
+  'cla-do-livro': {
+    title: 'O Clã do Livro',
+    subtitle: 'Livro digital + jornada feminina — acesso até 31/12/2026',
+    brlPrice: 97.00, brlOriginal: 297.00, // 🎂 ANIVER — regular: 297
+    usdPrice: 20.00, eurPrice: 18.00,
+    image: 'https://reikitimeacademy.com.br/wp-content/uploads/2025/12/mandala-feminina.png'
+  },
+  'negocio-magnetico': {
+    title: 'Negócio Magnético',
+    subtitle: 'Workshop: energia e mentalidade empreendedora — 3 meses de acesso',
+    brlPrice: 29.90, brlOriginal: 97.00, // 🎂 ANIVER — regular: 97
+    usdPrice: 6.00, eurPrice: 6.00,
+    image: 'https://reikitimeacademy.com.br/wp-content/uploads/2026/02/fernanda-apresentando.jpg'
   },
   'ebook': { 
     title: 'E-book Reiki Essencial', 
