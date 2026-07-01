@@ -309,10 +309,17 @@ function get_reiki_products() {
         ),
         'guardias' => array(
             'nome' => 'Guardiãs do Ventre',
-            'membership_id' => 13180, 
+            'membership_id' => 13180,
             'preco_brl' => 997.00,
             'preco_usd' => 200.00,
             'preco_eur' => 175.00
+        ),
+        'mandalas-reiki' => array(
+            'nome' => 'Mandalas de Reiki',
+            'membership_id' => 12229,
+            'preco_brl' => 197.00,
+            'preco_usd' => 40.00,
+            'preco_eur' => 35.00
         ),
         'ebook' => array(
             'nome' => 'Ebook',

@@ -81,6 +81,13 @@ const PRODUCTS: Record<string, { title: string, subtitle: string, brlPrice: numb
     usdPrice: 17.00, eurPrice: 17.00,
     image: '/infinity.png'
   },
+  'mandalas-reiki': {
+    title: 'Mandalas de Reiki',
+    subtitle: 'Curso gravado — 6 meses de acesso + manual e mandalas em PDF',
+    brlPrice: 197.00, brlOriginal: 297.00,
+    usdPrice: 40.00, eurPrice: 35.00,
+    image: '/mandalas.png'
+  },
   'reiki-florescer': {
     title: 'Reiki Florescer',
     subtitle: 'Acesso completo',
