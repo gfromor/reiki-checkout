@@ -11,8 +11,8 @@ Restaurar preços (procure pelos comentários `🎂 ANIVER`):
 | guardias | 597 / 120 / 105 | **997 / 200 / 175** (nome fica "Guardiãs do Clã") |
 | reiki-florescer | 97 / 20 / 18 | **297 / 60 / 55** |
 | mandalas-reiki | 29.90 / 6 / 6 | **197 / 40 / 35** |
-| infinity | 67 / 17 / 17 | **697 / ??USD / ??EUR** ← Gabriel definir USD/EUR cheios |
-| desafio-infinity | 67 / 17 / 17 | **497 / ??USD / ??EUR** ← Gabriel definir |
+| infinity | 67 / 17 / 17 | **697 / 135 / 120** |
+| desafio-infinity | 67 / 17 / 17 | **497 / 96 / 85** |
 | reiki-cristais | 47 / 10 / 9 | **597 / ?? / ??** (preço regular pós-promo — definir) |
 | masterclass-chakras | 29.90 / 6 / 6 | **197 / 40 / 35** (sugerido) |
 | cla-do-livro | 97 / 20 / 18 | **297 / 60 / 55** (sugerido) |
@@ -35,4 +35,5 @@ Mesmos valores acima (comentários `🎂 ANIVER` marcam as linhas). Commit + pus
 ## 5. Conferir
 - `?produto=cer` mostra 2.197 de novo.
 - `?produto=infinity` mostra 697 (fim da promo permanente — decisão do Gabriel 01/07).
+- Pendente ainda: preço regular pós-promo do reiki-cristais (597/?USD/?EUR) — definir na hora.
 - LP Florescer sem faixa e com 297.
